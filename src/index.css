@@ -1,3 +1,55 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Senior-friendly base styles */
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Larger touch targets for older adults */
+input[type="checkbox"] {
+  min-width: 20px;
+  min-height: 20px;
+}
+
+button {
+  min-height: 44px;
+}
+
+/* Signature canvas responsive */
+.sigCanvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Better scrollbar for the consent text */
+.max-h-64::-webkit-scrollbar {
+  width: 8px;
+}
+.max-h-64::-webkit-scrollbar-track {
+  background: #e2e8f0;
+  border-radius: 4px;
+}
+.max-h-64::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 4px;
+}
+
+/* Print styles */
+@media print {
+  header, button, .no-print {
+    display: none !important;
+  }
+  .rounded-2xl {
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+}

@@ -1,651 +1,1253 @@
-import { useMemo, useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import SignatureCanvas from "react-signature-canvas";
 import {
-  UserRound,
-  RotateCcw,
-  AlertTriangle,
-  CheckCircle2,
-  BarChart3,
-  ClipboardList,
-  BadgeCheck,
-  Cloud,
-  CloudOff,
-  Loader2,
-  TrendingUp,
+  UserRound, Shield, ClipboardList, Activity, AlertTriangle,
+  HeartPulse, Download, Edit3, Save, Trash2, Cloud, CloudOff,
+  CheckCircle2, XCircle, FileText, BarChart3, ChevronRight,
+  ChevronLeft, Loader2,
 } from "lucide-react";
+import { subscribeRecords, addRecord, updateRecord, deleteRecord, firebaseEnabled } from "./dataStore";
 import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
-import { subscribeRecords, addRecord, firebaseEnabled } from "./dataStore";
-import {
-  tests,
-  dimensions,
-  initialScores,
-  evaluateTest,
-  getClassificationLabel,
-  getScoreColor,
-  getIMCData,
-  classifyICFG,
-} from "./icfg";
+  evaluateSFT, calculateIMC, classifyIMC, waistRisk, getAgeGroup,
+} from "./sftBaremos";
+import { PATHOLOGIES, calculateECNTRisk, getPathologyRecommendations } from "./ecntRisk";
+import * as XLSX from "xlsx";
+import { saveAs } from "file-saver";
 
-// === COMPONENTES UI ===
+// ============ UI COMPONENTS ============
 const Card = ({ children, className = "" }) => (
   <div className={`rounded-2xl border bg-white shadow-sm ${className}`}>{children}</div>
 );
-
 const CardContent = ({ children, className = "" }) => (
   <div className={`p-5 ${className}`}>{children}</div>
 );
-
-const Button = ({ children, onClick, variant = "primary", className = "", disabled = false }) => {
+const Button = ({ children, onClick, variant = "primary", className = "", disabled = false, type = "button" }) => {
   const styles =
-    variant === "secondary"
-      ? "bg-slate-100 text-slate-800 hover:bg-slate-200"
-      : variant === "danger"
-      ? "bg-red-600 text-white hover:bg-red-700"
-      : "bg-indigo-600 text-white hover:bg-indigo-700";
-
-  const disabledStyles = disabled ? "opacity-50 cursor-not-allowed" : "";
-
+    variant === "secondary" ? "bg-slate-100 text-slate-800 hover:bg-slate-200"
+    : variant === "danger" ? "bg-red-600 text-white hover:bg-red-700"
+    : variant === "success" ? "bg-green-600 text-white hover:bg-green-700"
+    : "bg-blue-600 text-white hover:bg-blue-700";
   return (
     <button
+      type={type}
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${styles} ${disabledStyles} ${className}`}
+      className={`px-5 py-3 rounded-xl font-semibold text-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed ${styles} ${className}`}
     >
       {children}
     </button>
   );
 };
 
-const initialPerson = () => ({
-  nombre: "",
-  edad: "",
-  sexo: "",
-  sede: "",
-  fecha: new Date().toISOString().slice(0, 10),
-  peso: "",
-  talla: "",
-});
+// ============ STEPS ============
+const STEPS = [
+  { id: "consent", label: "Consentimiento", icon: Shield },
+  { id: "anamnesis", label: "Anamnesis", icon: ClipboardList },
+  { id: "anthropometry", label: "Antropometría", icon: UserRound },
+  { id: "sft", label: "Senior Fitness Test", icon: Activity },
+  { id: "safety", label: "Seguridad", icon: AlertTriangle },
+  { id: "risk", label: "Riesgo ECNT", icon: HeartPulse },
+  { id: "results", label: "Resultados", icon: BarChart3 },
+];
 
+// ============ MAIN APP ============
 export default function App() {
-  const [activeTab, setActiveTab] = useState("evaluacion");
-  const [evaluador, setEvaluador] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
+  const [currentStep, setCurrentStep] = useState(0);
   const [records, setRecords] = useState([]);
-  const [busqueda, setBusqueda] = useState("");
+  const [view, setView] = useState("form"); // form | database | edit
+  const [editingRecord, setEditingRecord] = useState(null);
+  const [saving, setSaving] = useState(false);
 
-  const [person, setPerson] = useState(initialPerson);
-  const [scores, setScores] = useState(initialScores);
+  // Form state
+  const [consent, setConsent] = useState({ accepted: false, name: "", document: "", signed: false });
+  const [anamnesis, setAnamnesis] = useState({ pathologies: {}, medications: {}, otherName: "", otherMed: "" });
+  const [anthropometry, setAnthropometry] = useState({ weight: "", height: "", waist: "", calf: "" });
+  const [sftData, setSftData] = useState({
+    chairStand: "", armCurl: "", walkTest: "", stepTest: "",
+    sitReach: "", backScratch: "", upAndGo: "",
+  });
+  const [demographics, setDemographics] = useState({ age: "", sex: "", sede: "", comuna: "", grupo: "" });
+  const [safety, setSafety] = useState({ pain: false, dizziness: false, fatigue: false, notes: "" });
 
-  // === SUSCRIPCIÓN A DATOS (Firebase o localStorage) ===
+  const sigCanvas = useRef(null);
+
   useEffect(() => {
-    const unsubscribe = subscribeRecords((live) => {
-      const sorted = [...live].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-      setRecords(sorted);
-    });
-    return unsubscribe;
+    const unsub = subscribeRecords(setRecords);
+    return unsub;
   }, []);
 
-  const result = useMemo(() => {
-    const detail = tests.map((test) => {
-      const rawInput = scores[test.id];
-      const score1to5 = evaluateTest(test.id, rawInput, person.edad, person.sexo);
+  // ===== CONSENT VALIDATION =====
+  const isConsentValid = consent.accepted && consent.name.trim() && consent.document.trim() && consent.signed;
 
-      const validScore = score1to5 > 0 ? score1to5 : 0;
-      const weighted = (validScore / 5) * test.weight;
-
-      return { ...test, rawInput, score1to5, validScore, weighted };
-    });
-
-    const total = detail.reduce((sum, item) => sum + item.weighted, 0);
-
-    const dimensionScores = dimensions.map((dim) => {
-      const items = detail.filter((item) => item.dimension === dim.name);
-      const value = items.reduce((sum, item) => sum + item.weighted, 0);
-      return { ...dim, value };
-    });
-
-    const validTests = detail.filter((d) => d.validScore > 0);
-    const weakest =
-      validTests.length > 0
-        ? [...validTests].sort((a, b) => a.validScore - b.validScore || b.weight - a.weight)[0]
-        : { name: "Faltan pruebas" };
-
-    const classification = classifyICFG(total);
-
-    return {
-      total: Number(total.toFixed(1)),
-      detail,
-      dimensionScores,
-      weakest,
-      classification,
-    };
-  }, [scores, person.edad, person.sexo]);
-
-  const imcData = useMemo(() => getIMCData(person.peso, person.talla), [person.peso, person.talla]);
-
-  const historial = useMemo(() => {
-    const query = busqueda.trim().toLowerCase();
-    if (!query) return [];
-    return records
-      .filter((r) => (r.nombre || "").toLowerCase().includes(query))
-      .sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
-  }, [records, busqueda]);
-
-  const updateScore = (id, value) => {
-    setScores((prev) => ({ ...prev, [id]: value }));
+  // ===== ANAMNESIS VALIDATION =====
+  const isAnamnesisValid = () => {
+    const selected = Object.entries(anamnesis.pathologies).filter(([, v]) => v);
+    for (const [key] of selected) {
+      if (key === "otra") {
+        if (!anamnesis.otherName.trim() || !anamnesis.otherMed.trim()) return false;
+      } else {
+        if (!anamnesis.medications[key]?.trim()) return false;
+      }
+    }
+    return true;
   };
 
-  const reset = () => {
-    setPerson((prev) => ({ ...prev, nombre: "", edad: "", sexo: "", peso: "", talla: "" }));
-    setScores(initialScores);
-  };
+  // ===== SAFETY CHECK =====
+  const hasSafetyAlert = safety.pain || safety.dizziness || safety.fatigue;
 
-  const saveRecord = async () => {
-    setIsSaving(true);
+  // ===== SAVE EVALUATION =====
+  const handleSave = async () => {
+    setSaving(true);
+    const imc = calculateIMC(anthropometry.weight, anthropometry.height);
+    const sftResults = evaluateSFT(sftData, demographics.sex, demographics.age);
+    const selectedPaths = Object.entries(anamnesis.pathologies).filter(([, v]) => v).map(([k]) => k);
+    const ecntRisk = calculateECNTRisk(selectedPaths, imc, anthropometry.waist, demographics.sex, sftResults);
 
-    const recordToSave = {
-      evaluador: evaluador || "No especificado",
-      ...person,
-      imcValue: imcData ? imcData.value : null,
-      imcCategory: imcData ? imcData.category : null,
-      scores,
-      total: result.total,
-      classification: result.classification.label,
-      weakest: result.weakest.name,
-      timestamp: Date.now(),
-      createdAt: new Date().toLocaleString(),
+    const record = {
+      timestamp: new Date().toISOString(),
+      consent: { name: consent.name, document: consent.document },
+      demographics,
+      anamnesis: {
+        pathologies: selectedPaths,
+        medications: anamnesis.medications,
+        otherName: anamnesis.otherName,
+        otherMed: anamnesis.otherMed,
+      },
+      anthropometry,
+      imc: imc ? imc.toFixed(1) : null,
+      imcClass: classifyIMC(imc)?.label || null,
+      sftData,
+      sftResults,
+      safety,
+      ecntRisk: { score: ecntRisk.score, level: ecntRisk.level },
+      hasSafetyAlert,
     };
 
     try {
-      await addRecord(recordToSave);
-      reset();
-    } catch (error) {
-      console.error("Error al guardar: ", error);
-      alert("Hubo un error al guardar los datos.");
-    } finally {
-      setIsSaving(false);
+      await addRecord(record);
+      resetForm();
+      setView("database");
+    } catch (err) {
+      console.error("Error guardando:", err);
+      alert("Error al guardar la evaluación. Intente nuevamente.");
+    }
+    setSaving(false);
+  };
+
+  const resetForm = () => {
+    setCurrentStep(0);
+    setConsent({ accepted: false, name: "", document: "", signed: false });
+    setAnamnesis({ pathologies: {}, medications: {}, otherName: "", otherMed: "" });
+    setAnthropometry({ weight: "", height: "", waist: "", calf: "" });
+    setSftData({ chairStand: "", armCurl: "", walkTest: "", stepTest: "", sitReach: "", backScratch: "", upAndGo: "" });
+    setDemographics({ age: "", sex: "", sede: "", comuna: "", grupo: "" });
+    setSafety({ pain: false, dizziness: false, fatigue: false, notes: "" });
+    if (sigCanvas.current) sigCanvas.current.clear();
+  };
+
+  // ===== EXPORT =====
+  const exportData = (format) => {
+    if (records.length === 0) return alert("No hay datos para exportar.");
+    const rows = records.map(r => ({
+      Fecha: r.timestamp ? new Date(r.timestamp).toLocaleDateString("es-CO") : "",
+      Nombre: r.consent?.name || "",
+      Documento: r.consent?.document || "",
+      Edad: r.demographics?.age || "",
+      Sexo: r.demographics?.sex || "",
+      Sede: r.demographics?.sede || "",
+      Comuna: r.demographics?.comuna || "",
+      Grupo: r.demographics?.grupo || "",
+      Peso_kg: r.anthropometry?.weight || "",
+      Talla_cm: r.anthropometry?.height || "",
+      IMC: r.imc || "",
+      Clasificacion_IMC: r.imcClass || "",
+      Perimetro_cintura: r.anthropometry?.waist || "",
+      Perimetro_pantorrilla: r.anthropometry?.calf || "",
+      Chair_Stand: r.sftData?.chairStand || "",
+      Arm_Curl: r.sftData?.armCurl || "",
+      Walk_6min: r.sftData?.walkTest || "",
+      Step_2min: r.sftData?.stepTest || "",
+      Sit_Reach: r.sftData?.sitReach || "",
+      Back_Scratch: r.sftData?.backScratch || "",
+      Up_And_Go: r.sftData?.upAndGo || "",
+      Riesgo_ECNT: r.ecntRisk?.level || "",
+      Patologias: r.anamnesis?.pathologies?.join(", ") || "",
+      Alerta_Seguridad: r.hasSafetyAlert ? "SÍ" : "NO",
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Evaluaciones_SFT");
+
+    if (format === "xlsx") {
+      const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+      saveAs(new Blob([buf], { type: "application/octet-stream" }), "evaluaciones_sft.xlsx");
+    } else {
+      const csv = XLSX.utils.sheet_to_csv(ws);
+      saveAs(new Blob([csv], { type: "text/csv;charset=utf-8" }), "evaluaciones_sft.csv");
     }
   };
 
-  const exportCSV = () => {
-    const headers = [
-      "FechaRegistro", "Evaluador", "Nombre", "Edad", "Sexo", "Peso(kg)", "Talla(cm)", "IMC", "Categoria_IMC", "Sede", "Puntaje_ICFG", "Clasificacion_ICFG", "Debilidad_Principal",
-      ...tests.map((t) => `${t.shortName} (${t.unit})`),
-    ];
-
-    const rows = records.map((r) => [
-      r.createdAt, r.evaluador, r.nombre, r.edad, r.sexo, r.peso || "", r.talla || "", r.imcValue || "", r.imcCategory || "", r.sede, r.total, r.classification, r.weakest,
-      ...tests.map((t) => r.scores?.[t.id] || ""),
-    ]);
-
-    const csv = [headers, ...rows]
-      .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","))
-      .join("\n");
-
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "evaluaciones_completas.csv";
-    link.click();
-    URL.revokeObjectURL(url);
+  // ===== EDIT RECORD =====
+  const handleEdit = (record) => {
+    setEditingRecord({ ...record });
+    setView("edit");
   };
 
-  const isDemographicMissing = !person.edad || !person.sexo || person.sexo === "Otro / No reporta";
-  const isAgeInvalid = person.edad !== "" && (Number(person.edad) < 18 || Number(person.edad) > 69);
+  const handleDeleteRecord = async (id) => {
+    if (!window.confirm("¿Está seguro de eliminar este registro?")) return;
+    await deleteRecord(id);
+  };
 
+  const handleUpdateRecord = async () => {
+    if (!editingRecord) return;
+    setSaving(true);
+    try {
+      await updateRecord(editingRecord.id, editingRecord);
+      setView("database");
+      setEditingRecord(null);
+    } catch (err) {
+      console.error(err);
+      alert("Error al actualizar.");
+    }
+    setSaving(false);
+  };
+
+  // ===== NAVIGATION =====
+  const canAdvance = () => {
+    if (currentStep === 0) return isConsentValid;
+    if (currentStep === 1) return isAnamnesisValid();
+    return true;
+  };
+
+  const nextStep = () => {
+    if (currentStep < STEPS.length - 1) setCurrentStep(currentStep + 1);
+  };
+  const prevStep = () => {
+    if (currentStep > 0) setCurrentStep(currentStep - 1);
+  };
+
+  // ===== RENDER =====
   return (
-    <div className="min-h-screen bg-slate-50 p-4 text-slate-900 md:p-8 font-sans">
-      <div className="mx-auto max-w-7xl space-y-6">
-
-        {/* ENCABEZADO PRINCIPAL */}
-        <header className="rounded-3xl bg-gradient-to-r from-indigo-700 to-slate-900 p-6 text-white shadow-lg relative overflow-hidden">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between relative z-10">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      {/* HEADER */}
+      <header className="bg-white shadow-md px-4 py-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <Activity className="w-8 h-8 text-blue-600" />
             <div>
-              <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-sm">
-                <ClipboardList size={16} /> Evaluación funcional poblacional
-              </div>
-              <h1 className="text-3xl font-black tracking-tight md:text-4xl">
-                Índice de Capacidad Funcional - ICFG
+              <h1 className="text-xl md:text-2xl font-bold text-slate-800">
+                Calculadora Senior Fitness Test
               </h1>
-              <p className="mt-2 max-w-3xl text-sm text-indigo-100 md:text-base">
-                El sistema calculará automáticamente el baremo (1 al 5) según la edad y el sexo, además del IMC.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <div className="rounded-2xl bg-white/10 p-4 text-center backdrop-blur min-w-[200px]">
-                <p className="text-sm text-indigo-100">Resultado actual</p>
-                <p className="text-5xl font-black">{result.total}</p>
-                <p className="text-xs text-indigo-100">puntos sobre 100</p>
-              </div>
-              <div
-                className={`flex items-center justify-center gap-2 text-xs font-bold rounded-full py-1.5 px-3 backdrop-blur ${
-                  firebaseEnabled ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-200"
-                }`}
-                title={
-                  firebaseEnabled
-                    ? "Conectado a Firebase"
-                    : "Sin Firebase: datos guardados en este navegador (localStorage)"
-                }
-              >
-                {firebaseEnabled ? (
-                  <><Cloud size={14} /> Conectado a la nube</>
-                ) : (
-                  <><CloudOff size={14} /> Almacenamiento local</>
-                )}
-              </div>
+              <p className="text-sm text-slate-500">Observatorio 2026 — Protocolo de Valoración Funcional</p>
             </div>
           </div>
-        </header>
-
-        {/* PESTAÑAS */}
-        <div className="flex gap-3">
-          {[
-            { id: "evaluacion", label: "Nueva Evaluación", icon: ClipboardList },
-            { id: "seguimiento", label: "Seguimiento", icon: TrendingUp },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition ${
-                  activeTab === tab.id
-                    ? "bg-indigo-600 text-white shadow"
-                    : "bg-white border text-slate-700 hover:bg-slate-50"
-                }`}
-              >
-                <Icon size={16} /> {tab.label}
-              </button>
-            );
-          })}
+          <div className="flex items-center gap-2 flex-wrap">
+            {firebaseEnabled ? (
+              <span className="flex items-center gap-1 text-sm text-green-600"><Cloud className="w-4 h-4" /> Nube</span>
+            ) : (
+              <span className="flex items-center gap-1 text-sm text-slate-400"><CloudOff className="w-4 h-4" /> Local</span>
+            )}
+            <Button variant="secondary" onClick={() => { setView("form"); resetForm(); }} className="!text-base !px-3 !py-2">
+              <FileText className="w-4 h-4 inline mr-1" />Nueva
+            </Button>
+            <Button variant="secondary" onClick={() => setView("database")} className="!text-base !px-3 !py-2">
+              <BarChart3 className="w-4 h-4 inline mr-1" />Base de Datos
+            </Button>
+          </div>
         </div>
+      </header>
 
-        {activeTab === "seguimiento" ? (
-          <Card>
-            <CardContent>
-              <h2 className="mb-1 flex items-center gap-2 text-xl font-bold">
-                <TrendingUp className="text-indigo-600" /> Seguimiento por usuario
-              </h2>
-              <p className="mb-4 text-sm text-slate-500">
-                Busca por nombre para ver la evolución del puntaje ICFG en el tiempo.
-              </p>
-              <input
-                className="mb-6 w-full rounded-xl border p-3 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                placeholder="Buscar por nombre..."
-                value={busqueda}
-                onChange={(e) => setBusqueda(e.target.value)}
-              />
-              {busqueda && historial.length === 0 ? (
-                <p className="text-sm text-slate-500">
-                  No hay evaluaciones para &quot;{busqueda}&quot;.
-                </p>
-              ) : (
-                <div className="h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={historial}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="fecha" />
-                      <YAxis domain={[0, 100]} />
-                      <Tooltip />
-                      <Line type="monotone" dataKey="total" stroke="#4f46e5" strokeWidth={3} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        ) : (
+      <main className="max-w-5xl mx-auto p-4 md:p-6">
+        {view === "form" && (
           <>
-            {/* CASILLA DEL EVALUADOR */}
-            <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4 shadow-sm flex flex-col md:flex-row md:items-center gap-4 transition-all">
-              <div className="flex items-center gap-2 text-indigo-900 font-bold whitespace-nowrap">
-                <BadgeCheck size={22} className="text-indigo-600" />
-                <span>Nombre del Evaluador:</span>
-              </div>
-              <input
-                className="flex-1 rounded-xl border border-indigo-200 bg-white p-3 text-sm font-semibold text-slate-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-sm"
-                placeholder="Ingresa tu nombre o código (se mantendrá en todos los registros de tu sesión)..."
-                value={evaluador}
-                onChange={(e) => setEvaluador(e.target.value)}
-              />
+            {/* STEP INDICATOR */}
+            <div className="flex overflow-x-auto gap-1 mb-6 pb-2">
+              {STEPS.map((step, i) => {
+                const Icon = step.icon;
+                const active = i === currentStep;
+                const done = i < currentStep;
+                return (
+                  <button
+                    key={step.id}
+                    onClick={() => { if (i <= currentStep || canAdvance()) setCurrentStep(i); }}
+                    className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all
+                      ${active ? "bg-blue-600 text-white shadow" : done ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    <span className="hidden sm:inline">{step.label}</span>
+                  </button>
+                );
+              })}
             </div>
 
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-              <section className="space-y-6 lg:col-span-2">
+            {/* STEP CONTENT */}
+            <Card className="mb-6">
+              <CardContent>
+                {currentStep === 0 && (
+                  <ConsentStep
+                    consent={consent}
+                    setConsent={setConsent}
+                    sigCanvas={sigCanvas}
+                  />
+                )}
+                {currentStep === 1 && (
+                  <AnamnesisStep
+                    anamnesis={anamnesis}
+                    setAnamnesis={setAnamnesis}
+                    demographics={demographics}
+                    setDemographics={setDemographics}
+                  />
+                )}
+                {currentStep === 2 && (
+                  <AnthropometryStep
+                    anthropometry={anthropometry}
+                    setAnthropometry={setAnthropometry}
+                    demographics={demographics}
+                  />
+                )}
+                {currentStep === 3 && (
+                  <SFTStep sftData={sftData} setSftData={setSftData} demographics={demographics} />
+                )}
+                {currentStep === 4 && (
+                  <SafetyStep safety={safety} setSafety={setSafety} />
+                )}
+                {currentStep === 5 && (
+                  <RiskStep
+                    anamnesis={anamnesis}
+                    anthropometry={anthropometry}
+                    demographics={demographics}
+                    sftData={sftData}
+                  />
+                )}
+                {currentStep === 6 && (
+                  <ResultsStep
+                    consent={consent}
+                    demographics={demographics}
+                    anamnesis={anamnesis}
+                    anthropometry={anthropometry}
+                    sftData={sftData}
+                    onSave={handleSave}
+                    saving={saving}
+                    hasSafetyAlert={hasSafetyAlert}
+                  />
+                )}
+              </CardContent>
+            </Card>
 
-                {/* DATOS DEL USUARIO + IMC */}
-                <Card className={isDemographicMissing || isAgeInvalid ? "ring-2 ring-orange-400" : ""}>
-                  <CardContent>
-                    <div className="flex justify-between items-center mb-4">
-                      <h2 className="flex items-center gap-2 text-xl font-bold">
-                        <UserRound className="text-indigo-600" /> Datos del usuario a evaluar
-                      </h2>
-                      <div className="flex gap-2">
-                        {isDemographicMissing && !isAgeInvalid && (
-                          <span className="text-xs font-bold bg-orange-100 text-orange-700 px-3 py-1 rounded-full animate-pulse">
-                            ¡Requeridos para cálculos!
-                          </span>
-                        )}
-                        {isAgeInvalid && (
-                          <span className="text-xs font-bold bg-red-100 text-red-700 px-3 py-1 rounded-full animate-pulse">
-                            Rango válido: 18 a 69 años
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-6">
-                      <input
-                        className="rounded-xl border p-3 md:col-span-2 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
-                        placeholder="Nombre completo"
-                        value={person.nombre}
-                        onChange={(e) => setPerson({ ...person, nombre: e.target.value })}
-                      />
-                      <input
-                        className={`rounded-xl border p-3 outline-none transition ${
-                          isAgeInvalid
-                            ? "bg-red-50 border-red-300 focus:border-red-500 focus:ring-1 focus:ring-red-500 text-red-700"
-                            : !person.edad
-                            ? "bg-orange-50 border-orange-200"
-                            : "focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                        }`}
-                        placeholder="Edad"
-                        type="number"
-                        min="18"
-                        max="69"
-                        value={person.edad}
-                        onChange={(e) => setPerson({ ...person, edad: e.target.value })}
-                      />
-                      <select
-                        className={`rounded-xl border p-3 outline-none transition ${
-                          !person.sexo || person.sexo === "Otro / No reporta"
-                            ? "bg-orange-50 border-orange-200"
-                            : "bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                        }`}
-                        value={person.sexo}
-                        onChange={(e) => setPerson({ ...person, sexo: e.target.value })}
-                      >
-                        <option value="" disabled>Sexo</option>
-                        <option value="Mujer">Mujer</option>
-                        <option value="Hombre">Hombre</option>
-                        <option value="Otro / No reporta">Otro / No reporta</option>
-                      </select>
-                      <input
-                        className="rounded-xl border p-3 md:col-span-2 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
-                        type="date"
-                        value={person.fecha}
-                        onChange={(e) => setPerson({ ...person, fecha: e.target.value })}
-                      />
-
-                      <input
-                        className="rounded-xl border p-3 md:col-span-2 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
-                        placeholder="Sede, escenario o grupo"
-                        value={person.sede}
-                        onChange={(e) => setPerson({ ...person, sede: e.target.value })}
-                      />
-
-                      <div className="relative">
-                        <input
-                          type="number"
-                          step="0.1"
-                          className="w-full rounded-xl border bg-white p-3 pr-8 text-sm font-bold text-slate-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 outline-none transition"
-                          placeholder="Peso"
-                          value={person.peso}
-                          onChange={(e) => setPerson({ ...person, peso: e.target.value })}
-                        />
-                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400">kg</span>
-                      </div>
-
-                      <div className="relative">
-                        <input
-                          type="number"
-                          step="1"
-                          className="w-full rounded-xl border bg-white p-3 pr-8 text-sm font-bold text-slate-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 outline-none transition"
-                          placeholder="Talla"
-                          value={person.talla}
-                          onChange={(e) => setPerson({ ...person, talla: e.target.value })}
-                        />
-                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400">cm</span>
-                      </div>
-
-                      {imcData ? (
-                        <div className={`md:col-span-2 rounded-xl border p-2 flex flex-col justify-center items-center text-center transition-colors ${imcData.color}`}>
-                          <div className="text-xs font-bold uppercase tracking-wide opacity-80">IMC: {imcData.value}</div>
-                          <div className="text-sm font-black leading-tight">{imcData.category}</div>
-                        </div>
-                      ) : (
-                        <div className="md:col-span-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-2 flex items-center justify-center text-xs font-medium text-slate-400 text-center">
-                          Calculadora de IMC
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardContent>
-                    <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
-                      <BarChart3 className="text-indigo-600" /> Pruebas Físicas (Dato Bruto)
-                    </h2>
-
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                      {result.detail.map((test) => {
-                        const Icon = test.icon;
-                        let badgeText = "Pendiente";
-
-                        if (test.score1to5 === -1) badgeText = "⚠️ Ingresa Edad/Sexo";
-                        else if (test.score1to5 === -2) badgeText = "🚫 Edad fuera de rango";
-                        else if (test.score1to5 !== null)
-                          badgeText = `${test.score1to5}/5 - ${getClassificationLabel(test.score1to5)}`;
-
-                        return (
-                          <div key={test.id} className="rounded-2xl border bg-slate-50 p-4 transition-all hover:border-indigo-200 hover:shadow-md">
-                            <div className="mb-3 flex items-start justify-between gap-3">
-                              <div>
-                                <p className="flex items-center gap-2 font-bold text-slate-800">
-                                  <Icon size={18} className="text-indigo-600" /> {test.name}
-                                </p>
-                                <p className="text-xs font-medium text-slate-500 mt-1">
-                                  {test.dimension} · Peso: {test.weight}%
-                                </p>
-                              </div>
-                              {test.validScore > 0 && (
-                                <span className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-bold text-indigo-800 whitespace-nowrap">
-                                  +{test.weighted.toFixed(1)} pts
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="flex gap-2">
-                              <div className="relative w-1/2">
-                                <input
-                                  type="number"
-                                  step="0.1"
-                                  className="w-full rounded-xl border bg-white p-3 pr-10 text-sm font-bold text-slate-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
-                                  placeholder={test.placeholder}
-                                  value={test.rawInput}
-                                  onChange={(e) => updateScore(test.id, e.target.value)}
-                                  disabled={isAgeInvalid}
-                                />
-                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400">
-                                  {test.unit}
-                                </span>
-                              </div>
-
-                              <div className={`w-1/2 rounded-xl border flex items-center justify-center text-xs font-bold text-center px-2 transition-colors ${getScoreColor(test.score1to5)}`}>
-                                {badgeText}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </CardContent>
-                </Card>
-              </section>
-
-              <aside className="space-y-6">
-                <Card className="overflow-hidden border-2 border-indigo-100 shadow-md">
-                  <CardContent>
-                    <h2 className="mb-2 text-xl font-black text-slate-800">Resultado ICFG</h2>
-                    <div className="mb-4 flex items-end gap-3">
-                      <span className="text-6xl font-black tracking-tighter text-indigo-900">{result.total}</span>
-                      <span className="mb-2 text-sm font-bold text-slate-500">/ 100 puntos</span>
-                    </div>
-
-                    <div className="h-4 overflow-hidden rounded-full bg-slate-100 border shadow-inner">
-                      <div
-                        className={`h-full transition-all duration-500 ease-out ${result.classification.bar}`}
-                        style={{ width: `${Math.min(result.total, 100)}%` }}
-                      />
-                    </div>
-
-                    <div className={`mt-5 rounded-2xl border p-4 shadow-sm ${result.classification.color}`}>
-                      <p className="text-lg font-black leading-tight mb-2">
-                        {result.classification.emoji} {result.classification.label}
-                      </p>
-                      <p className="text-sm opacity-90">{result.classification.profile}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardContent>
-                    <h3 className="mb-3 flex items-center gap-2 text-lg font-bold text-slate-800">
-                      <AlertTriangle className="text-orange-500" /> Debilidad principal detectada
-                    </h3>
-                    <p className="rounded-xl bg-orange-50 border border-orange-100 p-3 font-bold text-orange-900 shadow-inner">
-                      {result.weakest.name}
-                    </p>
-                    <p className="mt-3 text-xs font-medium text-slate-500 leading-relaxed">
-                      Basado en los baremos calculados, esta prueba demostró la mayor carencia. Prioriza su mejora en el plan de intervención.
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardContent>
-                    <h3 className="mb-3 flex items-center gap-2 text-lg font-bold text-slate-800">
-                      <CheckCircle2 className="text-emerald-600" /> Acción sugerida
-                    </h3>
-                    <p className="text-sm font-medium leading-relaxed text-slate-700 bg-slate-50 p-4 rounded-xl border">
-                      {result.classification.action}
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <div className="sticky bottom-4 z-20 bg-slate-50 py-2 space-y-3">
-                  <Button
-                    className="w-full shadow-md hover:shadow-lg"
-                    onClick={saveRecord}
-                    disabled={isSaving || isAgeInvalid || result.total === 0}
-                  >
-                    {isSaving ? (
-                      <>
-                        <Loader2 className="animate-spin" size={18} />
-                        Guardando...
-                      </>
-                    ) : (
-                      <>
-                        {firebaseEnabled ? <Cloud size={18} /> : <ClipboardList size={18} />}
-                        {firebaseEnabled ? "Guardar en la nube" : "Guardar"}
-                      </>
-                    )}
-                  </Button>
-                  <Button className="w-full shadow-sm" onClick={reset} variant="secondary" disabled={isSaving}>
-                    <RotateCcw size={18} /> Limpiar formulario
-                  </Button>
-                </div>
-              </aside>
+            {/* NAVIGATION */}
+            <div className="flex justify-between">
+              <Button variant="secondary" onClick={prevStep} disabled={currentStep === 0}>
+                <ChevronLeft className="w-5 h-5 inline" /> Anterior
+              </Button>
+              {currentStep < STEPS.length - 1 ? (
+                <Button onClick={nextStep} disabled={!canAdvance()}>
+                  Siguiente <ChevronRight className="w-5 h-5 inline" />
+                </Button>
+              ) : null}
             </div>
           </>
         )}
 
-        {/* BASE DE DATOS CONSOLIDADA */}
-        <Card className="mt-8 border-indigo-100 shadow-sm">
-          <CardContent>
-            <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between border-b pb-4">
-              <div>
-                <h2 className="text-xl font-bold text-slate-800">Base de Datos Consolidada</h2>
-                <p className="text-sm font-medium text-slate-500 mt-1">
-                  Muestra todas las evaluaciones registradas. Exporta los datos crudos a CSV para el observatorio.
-                </p>
-              </div>
-              <Button
-                onClick={exportCSV}
-                variant="secondary"
-                className="md:w-auto font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200"
-                disabled={records.length === 0}
-              >
-                Descargar Base de Datos (CSV)
-              </Button>
-            </div>
+        {view === "database" && (
+          <DatabaseView
+            records={records}
+            onEdit={handleEdit}
+            onDelete={handleDeleteRecord}
+            onExport={exportData}
+            onNew={() => { setView("form"); resetForm(); }}
+          />
+        )}
 
-            <div className="overflow-x-auto rounded-xl border">
-              <table className="w-full min-w-[1000px] border-collapse text-sm text-slate-700">
-                <thead>
-                  <tr className="bg-slate-50 text-left border-b border-slate-200">
-                    <th className="p-4 font-bold">Evaluador</th>
-                    <th className="p-4 font-bold">Usuario</th>
-                    <th className="p-4 font-bold">IMC OMS</th>
-                    <th className="p-4 font-bold text-center">Sede/Grupo</th>
-                    <th className="p-4 font-black text-indigo-900 bg-indigo-50 text-center">ICFG</th>
-                    <th className="p-4 font-bold">Alerta (Debilidad)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {records.length === 0 ? (
-                    <tr>
-                      <td className="p-8 text-center text-slate-500 font-medium" colSpan="6">
-                        No hay evaluaciones guardadas en la base de datos.<br />
-                        <span className="text-xs font-normal">Calcula un índice y presiona &quot;Guardar&quot; para iniciar.</span>
-                      </td>
-                    </tr>
-                  ) : (
-                    records.map((record) => (
-                      <tr key={record.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="p-4 font-semibold text-slate-600 whitespace-nowrap">
-                          {record.evaluador || "-"}
-                        </td>
-                        <td className="p-4 font-bold text-slate-900">
-                          {record.nombre || "Sin nombre"}
-                          <span className="block text-xs font-normal text-slate-500 mt-1">
-                            {record.sexo && record.sexo !== "" ? `${record.sexo}, ` : ""}
-                            {record.edad ? `${record.edad} años` : ""}
-                          </span>
-                        </td>
-                        <td className="p-4">
-                          {record.imcValue ? (
-                            <div>
-                              <span className="font-black text-slate-800">{record.imcValue}</span>
-                              <span className="block text-xs font-semibold text-slate-500 mt-0.5">{record.imcCategory}</span>
-                            </div>
-                          ) : (
-                            "-"
-                          )}
-                        </td>
-                        <td className="p-4 truncate max-w-[200px] text-center">{record.sede || "-"}</td>
-                        <td className="p-4 font-black text-lg text-indigo-600 bg-indigo-50/30 text-center">
-                          {record.total}
-                        </td>
-                        <td className="p-4 font-medium text-orange-700 text-xs">{record.weakest}</td>
-                      </tr>
-                    ))
+        {view === "edit" && editingRecord && (
+          <EditView
+            record={editingRecord}
+            setRecord={setEditingRecord}
+            onSave={handleUpdateRecord}
+            onCancel={() => { setView("database"); setEditingRecord(null); }}
+            saving={saving}
+          />
+        )}
+      </main>
+    </div>
+  );
+}
+
+// ============ STEP 1: CONSENTIMIENTO ============
+function ConsentStep({ consent, setConsent, sigCanvas }) {
+  const clearSignature = () => {
+    if (sigCanvas.current) sigCanvas.current.clear();
+    setConsent(c => ({ ...c, signed: false }));
+  };
+
+  const handleSignEnd = () => {
+    if (sigCanvas.current && !sigCanvas.current.isEmpty()) {
+      setConsent(c => ({ ...c, signed: true }));
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+        <Shield className="w-7 h-7 text-blue-600" /> Consentimiento Informado
+      </h2>
+
+      {/* Consent text */}
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 max-h-64 overflow-y-auto text-base leading-relaxed text-slate-700">
+        <p className="font-semibold mb-2">Documento de Consentimiento Informado</p>
+        <p className="mb-2">
+          Como parte de los esfuerzos por promover el envejecimiento activo y fortalecer la calidad de vida en nuestra comunidad, le invitamos a participar en una valoración de su capacidad funcional mediante el protocolo Senior Fitness Test (SFT).
+        </p>
+        <p className="mb-2">
+          El propósito de esta evaluación es medir componentes esenciales como su fuerza, flexibilidad, capacidad aeróbica y equilibrio, permitiéndonos orientar con mayor precisión las estrategias y recomendaciones de actividad física que favorezcan su autonomía y bienestar diario.
+        </p>
+        <p className="mb-2 font-semibold">Consideraciones Éticas y de Seguridad:</p>
+        <ul className="list-disc pl-5 space-y-1 mb-2">
+          <li><strong>Voluntariedad:</strong> Su participación es totalmente libre y voluntaria. Puede declinar o solicitar la interrupción en cualquier momento.</li>
+          <li><strong>Seguridad:</strong> Ante cualquier síntoma de dolor, mareo o fatiga inusual, la evaluación se detendrá de manera inmediata.</li>
+          <li><strong>Confidencialidad:</strong> La información será tratada bajo estrictos principios de reserva académica, con fines exclusivamente estadísticos y de investigación.</li>
+        </ul>
+        <p>
+          Confirmo que he recibido una explicación clara y comprensible sobre el propósito y el procedimiento de esta evaluación. Autorizo el uso de mis datos exclusivamente para fines estadísticos y de investigación en el marco de los proyectos de salud y recreación de INDER Medellín y la Universidad de Antioquia.
+        </p>
+      </div>
+
+      {/* Checkbox */}
+      <label className="flex items-center gap-3 cursor-pointer p-3 bg-slate-50 rounded-xl border-2 border-slate-200 hover:border-blue-400 transition-colors">
+        <input
+          type="checkbox"
+          checked={consent.accepted}
+          onChange={e => setConsent(c => ({ ...c, accepted: e.target.checked }))}
+          className="w-6 h-6 accent-blue-600"
+        />
+        <span className="text-lg font-medium text-slate-700">Acepto el consentimiento informado</span>
+      </label>
+
+      {/* Name & Document */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-base font-medium text-slate-700 mb-1">Nombre completo *</label>
+          <input
+            type="text"
+            value={consent.name}
+            onChange={e => setConsent(c => ({ ...c, name: e.target.value }))}
+            className="w-full px-4 py-3 text-lg border-2 border-slate-300 rounded-xl focus:border-blue-500 focus:outline-none"
+            placeholder="Nombre completo del participante"
+          />
+        </div>
+        <div>
+          <label className="block text-base font-medium text-slate-700 mb-1">Documento de identidad *</label>
+          <input
+            type="text"
+            value={consent.document}
+            onChange={e => setConsent(c => ({ ...c, document: e.target.value }))}
+            className="w-full px-4 py-3 text-lg border-2 border-slate-300 rounded-xl focus:border-blue-500 focus:outline-none"
+            placeholder="Número de documento"
+          />
+        </div>
+      </div>
+
+      {/* Signature */}
+      <div>
+        <label className="block text-base font-medium text-slate-700 mb-2">Firma del participante (Digital) *</label>
+        <div className="border-2 border-slate-300 rounded-xl overflow-hidden bg-white">
+          <SignatureCanvas
+            ref={sigCanvas}
+            canvasProps={{ className: "w-full h-40 md:h-48" }}
+            onEnd={handleSignEnd}
+          />
+        </div>
+        <div className="flex items-center gap-4 mt-2">
+          <Button variant="secondary" onClick={clearSignature} className="!text-sm !px-3 !py-2">
+            Limpiar firma
+          </Button>
+          {consent.signed && (
+            <span className="flex items-center gap-1 text-green-600 text-sm font-medium">
+              <CheckCircle2 className="w-4 h-4" /> Firma registrada
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Validation message */}
+      {!isConsentValid(consent) && (
+        <div className="bg-yellow-50 border border-yellow-300 rounded-xl p-3 text-yellow-800 text-base">
+          <AlertTriangle className="w-5 h-5 inline mr-2" />
+          Debe aceptar el consentimiento, escribir su nombre y documento, y firmar para continuar.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function isConsentValid(consent) {
+  return consent.accepted && consent.name.trim() && consent.document.trim() && consent.signed;
+}
+
+// ============ STEP 2: ANAMNESIS ============
+function AnamnesisStep({ anamnesis, setAnamnesis, demographics, setDemographics }) {
+  const togglePathology = (id) => {
+    setAnamnesis(a => ({
+      ...a,
+      pathologies: { ...a.pathologies, [id]: !a.pathologies[id] },
+    }));
+  };
+
+  const setMedication = (id, value) => {
+    setAnamnesis(a => ({
+      ...a,
+      medications: { ...a.medications, [id]: value },
+    }));
+  };
+
+  const selectedPaths = Object.entries(anamnesis.pathologies).filter(([, v]) => v);
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+        <ClipboardList className="w-7 h-7 text-blue-600" /> Anamnesis — Datos del Participante
+      </h2>
+
+      {/* Demographics */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl">
+        <div>
+          <label className="block text-base font-medium text-slate-700 mb-1">Edad *</label>
+          <input
+            type="number"
+            min="60" max="100"
+            value={demographics.age}
+            onChange={e => setDemographics(d => ({ ...d, age: e.target.value }))}
+            className="w-full px-4 py-3 text-lg border-2 border-slate-300 rounded-xl focus:border-blue-500 focus:outline-none"
+            placeholder="Ej: 68"
+          />
+        </div>
+        <div>
+          <label className="block text-base font-medium text-slate-700 mb-1">Sexo *</label>
+          <select
+            value={demographics.sex}
+            onChange={e => setDemographics(d => ({ ...d, sex: e.target.value }))}
+            className="w-full px-4 py-3 text-lg border-2 border-slate-300 rounded-xl focus:border-blue-500 focus:outline-none bg-white"
+          >
+            <option value="">Seleccionar...</option>
+            <option value="Masculino">Masculino</option>
+            <option value="Femenino">Femenino</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-base font-medium text-slate-700 mb-1">Sede / Comuna</label>
+          <input
+            type="text"
+            value={demographics.sede}
+            onChange={e => setDemographics(d => ({ ...d, sede: e.target.value }))}
+            className="w-full px-4 py-3 text-lg border-2 border-slate-300 rounded-xl focus:border-blue-500 focus:outline-none"
+            placeholder="Ej: Comuna 10"
+          />
+        </div>
+        <div>
+          <label className="block text-base font-medium text-slate-700 mb-1">Grupo / Código</label>
+          <input
+            type="text"
+            value={demographics.grupo}
+            onChange={e => setDemographics(d => ({ ...d, grupo: e.target.value }))}
+            className="w-full px-4 py-3 text-lg border-2 border-slate-300 rounded-xl focus:border-blue-500 focus:outline-none"
+            placeholder="Código de grupo"
+          />
+        </div>
+      </div>
+
+      {/* Pathologies */}
+      <div>
+        <h3 className="text-lg font-semibold text-slate-700 mb-3">Selección de Patologías</h3>
+        <p className="text-sm text-slate-500 mb-3">
+          Si selecciona una patología, el campo de medicamento es obligatorio.
+        </p>
+        <div className="space-y-3">
+          {PATHOLOGIES.map(path => (
+            <div key={path.id} className={`p-3 rounded-xl border-2 transition-colors ${
+              anamnesis.pathologies[path.id] ? "border-blue-400 bg-blue-50" : "border-slate-200 bg-white"
+            }`}>
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!anamnesis.pathologies[path.id]}
+                  onChange={() => togglePathology(path.id)}
+                  className="w-5 h-5 accent-blue-600"
+                />
+                <span className="text-base font-medium text-slate-700">{path.label}</span>
+              </label>
+
+              {anamnesis.pathologies[path.id] && path.id !== "otra" && (
+                <div className="mt-2 ml-8">
+                  <input
+                    type="text"
+                    value={anamnesis.medications[path.id] || ""}
+                    onChange={e => setMedication(path.id, e.target.value)}
+                    className="w-full px-3 py-2 text-base border-2 border-slate-300 rounded-lg focus:border-blue-500 focus:outline-none"
+                    placeholder="Detalle de medicamentos (obligatorio)"
+                  />
+                  {!anamnesis.medications[path.id]?.trim() && (
+                    <p className="text-red-500 text-sm mt-1">* Medicamento obligatorio</p>
                   )}
-                </tbody>
-              </table>
+                </div>
+              )}
+
+              {anamnesis.pathologies[path.id] && path.id === "otra" && (
+                <div className="mt-2 ml-8 space-y-2">
+                  <input
+                    type="text"
+                    value={anamnesis.otherName}
+                    onChange={e => setAnamnesis(a => ({ ...a, otherName: e.target.value }))}
+                    className="w-full px-3 py-2 text-base border-2 border-slate-300 rounded-lg focus:border-blue-500 focus:outline-none"
+                    placeholder="¿Cuál patología? (obligatorio)"
+                  />
+                  {!anamnesis.otherName.trim() && (
+                    <p className="text-red-500 text-sm">* Especifique la patología</p>
+                  )}
+                  <input
+                    type="text"
+                    value={anamnesis.otherMed}
+                    onChange={e => setAnamnesis(a => ({ ...a, otherMed: e.target.value }))}
+                    className="w-full px-3 py-2 text-base border-2 border-slate-300 rounded-lg focus:border-blue-500 focus:outline-none"
+                    placeholder="¿Qué medicamento toma? (obligatorio)"
+                  />
+                  {!anamnesis.otherMed.trim() && (
+                    <p className="text-red-500 text-sm">* Especifique el medicamento</p>
+                  )}
+                </div>
+              )}
             </div>
+          ))}
+        </div>
+      </div>
+
+      {selectedPaths.length > 0 && !isAnamnesisStepValid(anamnesis) && (
+        <div className="bg-red-50 border border-red-300 rounded-xl p-3 text-red-700 text-base">
+          <XCircle className="w-5 h-5 inline mr-2" />
+          Debe completar el campo de medicamentos para cada patología seleccionada.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function isAnamnesisStepValid(anamnesis) {
+  const selected = Object.entries(anamnesis.pathologies).filter(([, v]) => v);
+  for (const [key] of selected) {
+    if (key === "otra") {
+      if (!anamnesis.otherName.trim() || !anamnesis.otherMed.trim()) return false;
+    } else {
+      if (!anamnesis.medications[key]?.trim()) return false;
+    }
+  }
+  return true;
+}
+
+// ============ STEP 3: ANTHROPOMETRY ============
+function AnthropometryStep({ anthropometry, setAnthropometry, demographics }) {
+  const imc = calculateIMC(anthropometry.weight, anthropometry.height);
+  const imcData = classifyIMC(imc);
+  const waist = waistRisk(anthropometry.waist, demographics.sex);
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+        <UserRound className="w-7 h-7 text-blue-600" /> Pruebas Antropométricas
+      </h2>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-base font-medium text-slate-700 mb-1">Peso (kg)</label>
+          <input
+            type="number" step="0.1"
+            value={anthropometry.weight}
+            onChange={e => setAnthropometry(a => ({ ...a, weight: e.target.value }))}
+            className="w-full px-4 py-3 text-lg border-2 border-slate-300 rounded-xl focus:border-blue-500 focus:outline-none"
+            placeholder="Ej: 72.5"
+          />
+        </div>
+        <div>
+          <label className="block text-base font-medium text-slate-700 mb-1">Talla (cm)</label>
+          <input
+            type="number" step="0.1"
+            value={anthropometry.height}
+            onChange={e => setAnthropometry(a => ({ ...a, height: e.target.value }))}
+            className="w-full px-4 py-3 text-lg border-2 border-slate-300 rounded-xl focus:border-blue-500 focus:outline-none"
+            placeholder="Ej: 165"
+          />
+        </div>
+        <div>
+          <label className="block text-base font-medium text-slate-700 mb-1">Perímetro de cintura (cm)</label>
+          <input
+            type="number" step="0.1"
+            value={anthropometry.waist}
+            onChange={e => setAnthropometry(a => ({ ...a, waist: e.target.value }))}
+            className="w-full px-4 py-3 text-lg border-2 border-slate-300 rounded-xl focus:border-blue-500 focus:outline-none"
+            placeholder="Ej: 88.5"
+          />
+        </div>
+        <div>
+          <label className="block text-base font-medium text-slate-700 mb-1">Perímetro de pantorrilla (cm)</label>
+          <input
+            type="number" step="0.1"
+            value={anthropometry.calf}
+            onChange={e => setAnthropometry(a => ({ ...a, calf: e.target.value }))}
+            className="w-full px-4 py-3 text-lg border-2 border-slate-300 rounded-xl focus:border-blue-500 focus:outline-none"
+            placeholder="Ej: 34.0"
+          />
+        </div>
+      </div>
+
+      {/* IMC Result */}
+      {imc && (
+        <div className="bg-slate-50 p-4 rounded-xl border">
+          <h3 className="text-lg font-semibold text-slate-700 mb-2">Índice de Masa Corporal (IMC)</h3>
+          <div className="flex items-center gap-4 flex-wrap">
+            <span className="text-3xl font-bold text-slate-800">{imc.toFixed(1)}</span>
+            <span className={`text-lg font-semibold ${imcData?.color}`}>{imcData?.label}</span>
+            <span className="text-sm text-slate-500">Riesgo: {imcData?.risk}</span>
+          </div>
+          <p className="text-sm text-slate-500 mt-1">OMS: Normal 18.5-24.9 | Sobrepeso 25-29.9 | Obesidad ≥30</p>
+        </div>
+      )}
+
+      {/* Waist Risk */}
+      {waist && (
+        <div className="bg-slate-50 p-4 rounded-xl border">
+          <h3 className="text-lg font-semibold text-slate-700 mb-1">Riesgo por Perímetro de Cintura</h3>
+          <p className={`text-lg font-semibold ${waist.color}`}>
+            {waist.risk} {demographics.sex === "Masculino" ? "(Límite: 90 cm)" : "(Límite: 80 cm)"}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ STEP 4: SENIOR FITNESS TEST ============
+function SFTStep({ sftData, setSftData, demographics }) {
+  const tests = [
+    { id: "chairStand", name: "Sentarse y levantarse de una silla", desc: "Repeticiones en 30 segundos", unit: "rep", placeholder: "Ej: 14" },
+    { id: "armCurl", name: "Flexiones del brazo (Arm Curl)", desc: "Repeticiones en 30 seg. Mujeres: 5 lb / Hombres: 8 lb", unit: "rep", placeholder: "Ej: 16" },
+    { id: "walkTest", name: "Caminar 6 minutos (6-Min Walk)", desc: "Distancia total en yardas", unit: "yardas", placeholder: "Ej: 580" },
+    { id: "stepTest", name: "2 Minutos Marcha (2-Min Step)", desc: "Total de pasos completos en 2 minutos", unit: "pasos", placeholder: "Ej: 85" },
+    { id: "sitReach", name: "Flexión del tronco en silla (Sit & Reach)", desc: "Distancia en cm (+/-) desde la punta del zapato", unit: "cm", placeholder: "Ej: +3.5 o -2.0" },
+    { id: "backScratch", name: "Alcanzar manos tras la espalda (Back Scratch)", desc: "Distancia en cm (+/-) entre dedos medios", unit: "cm", placeholder: "Ej: -5.0 o +1.5" },
+    { id: "upAndGo", name: "Levantarse, caminar y sentarse (8-Foot Up & Go)", desc: "Tiempo en segundos (menor es mejor)", unit: "seg", placeholder: "Ej: 5.8" },
+  ];
+
+  const sftResults = evaluateSFT(sftData, demographics.sex, demographics.age);
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+        <Activity className="w-7 h-7 text-blue-600" /> Protocolo Senior Fitness Test (SFT)
+      </h2>
+
+      {demographics.age && demographics.sex && (
+        <div className="bg-blue-50 p-3 rounded-xl text-sm text-blue-800">
+          Baremos aplicados: {demographics.sex} — Grupo de edad: {getAgeGroup(Number(demographics.age)) || "No aplica"}
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {tests.map(test => {
+          return (
+            <div key={test.id} className="p-4 bg-slate-50 rounded-xl border">
+              <label className="block text-base font-semibold text-slate-700 mb-1">{test.name}</label>
+              <p className="text-sm text-slate-500 mb-2">{test.desc}</p>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number" step="0.1"
+                  value={sftData[test.id]}
+                  onChange={e => setSftData(d => ({ ...d, [test.id]: e.target.value }))}
+                  className="flex-1 px-4 py-3 text-lg border-2 border-slate-300 rounded-xl focus:border-blue-500 focus:outline-none"
+                  placeholder={test.placeholder}
+                />
+                <span className="text-sm text-slate-500 font-medium">{test.unit}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Results Preview */}
+      {sftResults.length > 0 && (
+        <div className="mt-6">
+          <h3 className="text-lg font-semibold text-slate-700 mb-3">Clasificación Preliminar</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {sftResults.map((r, i) => (
+              <div key={i} className={`flex items-center justify-between p-3 rounded-lg border ${
+                r.classification === "above" ? "bg-green-50 border-green-300" :
+                r.classification === "normal" ? "bg-blue-50 border-blue-300" :
+                r.classification === "below" ? "bg-red-50 border-red-300" :
+                "bg-slate-50 border-slate-200"
+              }`}>
+                <span className="text-sm font-medium">{r.test}</span>
+                <span className={`text-sm font-bold ${
+                  r.classification === "above" ? "text-green-700" :
+                  r.classification === "normal" ? "text-blue-700" :
+                  r.classification === "below" ? "text-red-700" : "text-slate-500"
+                }`}>
+                  {r.value} {r.unit} — {
+                    r.classification === "above" ? "Superior" :
+                    r.classification === "normal" ? "Normal" :
+                    r.classification === "below" ? "Por debajo" : "—"
+                  }
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ STEP 5: SAFETY ============
+function SafetyStep({ safety, setSafety }) {
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+        <AlertTriangle className="w-7 h-7 text-orange-500" /> Validaciones de Seguridad
+      </h2>
+
+      <div className="bg-orange-50 border border-orange-300 rounded-xl p-4 text-orange-800">
+        <p className="font-semibold mb-2">Importante:</p>
+        <p>Si el participante presenta alguno de los siguientes síntomas durante la evaluación, la sesión debe detenerse inmediatamente.</p>
+      </div>
+
+      <div className="space-y-3">
+        <label className={`flex items-center gap-3 p-4 rounded-xl border-2 cursor-pointer transition-colors ${
+          safety.pain ? "border-red-400 bg-red-50" : "border-slate-200 bg-white hover:border-slate-300"
+        }`}>
+          <input
+            type="checkbox"
+            checked={safety.pain}
+            onChange={e => setSafety(s => ({ ...s, pain: e.target.checked }))}
+            className="w-6 h-6 accent-red-600"
+          />
+          <div>
+            <span className="text-lg font-medium text-slate-700">Dolor</span>
+            <p className="text-sm text-slate-500">Dolor de cualquier clase, entumecimiento, dolor torácico</p>
+          </div>
+        </label>
+
+        <label className={`flex items-center gap-3 p-4 rounded-xl border-2 cursor-pointer transition-colors ${
+          safety.dizziness ? "border-red-400 bg-red-50" : "border-slate-200 bg-white hover:border-slate-300"
+        }`}>
+          <input
+            type="checkbox"
+            checked={safety.dizziness}
+            onChange={e => setSafety(s => ({ ...s, dizziness: e.target.checked }))}
+            className="w-6 h-6 accent-red-600"
+          />
+          <div>
+            <span className="text-lg font-medium text-slate-700">Mareo / Vértigo</span>
+            <p className="text-sm text-slate-500">Vértigo, confusión, desorientación, visión velada</p>
+          </div>
+        </label>
+
+        <label className={`flex items-center gap-3 p-4 rounded-xl border-2 cursor-pointer transition-colors ${
+          safety.fatigue ? "border-red-400 bg-red-50" : "border-slate-200 bg-white hover:border-slate-300"
+        }`}>
+          <input
+            type="checkbox"
+            checked={safety.fatigue}
+            onChange={e => setSafety(s => ({ ...s, fatigue: e.target.checked }))}
+            className="w-6 h-6 accent-red-600"
+          />
+          <div>
+            <span className="text-lg font-medium text-slate-700">Fatiga Inusual</span>
+            <p className="text-sm text-slate-500">Dificultad para respirar, latidos irregulares, náuseas, pérdida de control muscular</p>
+          </div>
+        </label>
+      </div>
+
+      <div>
+        <label className="block text-base font-medium text-slate-700 mb-1">Observaciones de seguridad</label>
+        <textarea
+          value={safety.notes}
+          onChange={e => setSafety(s => ({ ...s, notes: e.target.value }))}
+          className="w-full px-4 py-3 text-base border-2 border-slate-300 rounded-xl focus:border-blue-500 focus:outline-none"
+          rows={3}
+          placeholder="Observaciones adicionales sobre la seguridad del participante..."
+        />
+      </div>
+
+      {(safety.pain || safety.dizziness || safety.fatigue) && (
+        <div className="bg-red-100 border-2 border-red-400 rounded-xl p-4 text-red-800">
+          <p className="font-bold text-lg flex items-center gap-2">
+            <AlertTriangle className="w-6 h-6" /> ALERTA DE SEGURIDAD
+          </p>
+          <p className="mt-1">Se ha detectado un síntoma de riesgo. La evaluación debe ser suspendida o adaptada según criterio del evaluador.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ STEP 6: ECNT RISK ============
+function RiskStep({ anamnesis, anthropometry, demographics, sftData }) {
+  const imc = calculateIMC(anthropometry.weight, anthropometry.height);
+  const selectedPaths = Object.entries(anamnesis.pathologies).filter(([, v]) => v).map(([k]) => k);
+  const sftResults = evaluateSFT(sftData, demographics.sex, demographics.age);
+  const risk = calculateECNTRisk(selectedPaths, imc, anthropometry.waist, demographics.sex, sftResults);
+  const recommendations = getPathologyRecommendations(selectedPaths);
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+        <HeartPulse className="w-7 h-7 text-red-500" /> Evaluación de Riesgo ECNT
+      </h2>
+
+      {/* Risk Level */}
+      <div className={`p-6 rounded-2xl text-white ${risk.color}`}>
+        <p className="text-sm uppercase font-medium opacity-90">Nivel de Riesgo</p>
+        <p className="text-4xl font-bold mt-1">{risk.level}</p>
+        <p className="mt-2 text-base opacity-90">Puntaje: {risk.score} puntos</p>
+      </div>
+
+      {/* Risk Factors */}
+      {risk.factors.length > 0 && (
+        <div className="bg-slate-50 p-4 rounded-xl border">
+          <h3 className="text-lg font-semibold text-slate-700 mb-2">Factores de Riesgo Identificados</h3>
+          <ul className="space-y-1">
+            {risk.factors.map((f, i) => (
+              <li key={i} className="flex items-center gap-2 text-base text-slate-700">
+                <span className="w-2 h-2 rounded-full bg-red-400"></span>
+                {f}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Recommendation */}
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+        <h3 className="text-lg font-semibold text-blue-800 mb-1">Recomendación General</h3>
+        <p className="text-base text-blue-700">{risk.recommendation}</p>
+      </div>
+
+      {/* Specific Recommendations */}
+      {recommendations.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-lg font-semibold text-slate-700">Recomendaciones por Patología</h3>
+          {recommendations.map((rec, i) => (
+            <div key={i} className="bg-white p-4 rounded-xl border">
+              <h4 className="font-bold text-slate-800">{rec.pathology}</h4>
+              <p className="text-sm text-red-600 mt-1"><strong>Precauciones:</strong> {rec.precautions}</p>
+              <p className="text-sm text-green-700 mt-1"><strong>Recomendado:</strong> {rec.recommended}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ STEP 7: RESULTS ============
+function ResultsStep({ consent, demographics, anamnesis, anthropometry, sftData, onSave, saving, hasSafetyAlert }) {
+  const imc = calculateIMC(anthropometry.weight, anthropometry.height);
+  const imcData = classifyIMC(imc);
+  const sftResults = evaluateSFT(sftData, demographics.sex, demographics.age);
+  const selectedPaths = Object.entries(anamnesis.pathologies).filter(([, v]) => v).map(([k]) => k);
+  const risk = calculateECNTRisk(selectedPaths, imc, anthropometry.waist, demographics.sex, sftResults);
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+        <BarChart3 className="w-7 h-7 text-blue-600" /> Resumen de Resultados
+      </h2>
+
+      {/* Participant info */}
+      <div className="bg-slate-50 p-4 rounded-xl border">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+          <div><strong>Nombre:</strong> {consent.name}</div>
+          <div><strong>Documento:</strong> {consent.document}</div>
+          <div><strong>Edad:</strong> {demographics.age} años</div>
+          <div><strong>Sexo:</strong> {demographics.sex}</div>
+        </div>
+      </div>
+
+      {/* IMC */}
+      {imc && (
+        <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-xl border">
+          <span className="font-semibold">IMC:</span>
+          <span className="text-2xl font-bold">{imc.toFixed(1)}</span>
+          <span className={`font-semibold ${imcData?.color}`}>{imcData?.label}</span>
+        </div>
+      )}
+
+      {/* SFT Results */}
+      {sftResults.length > 0 && (
+        <div>
+          <h3 className="text-lg font-semibold text-slate-700 mb-2">Resultados SFT</h3>
+          <div className="space-y-2">
+            {sftResults.map((r, i) => (
+              <div key={i} className={`flex items-center justify-between p-3 rounded-lg border ${
+                r.classification === "above" ? "bg-green-50 border-green-300" :
+                r.classification === "normal" ? "bg-blue-50 border-blue-300" :
+                r.classification === "below" ? "bg-red-50 border-red-300" :
+                "bg-slate-50 border-slate-200"
+              }`}>
+                <span className="font-medium text-sm">{r.test}</span>
+                <span className="font-bold text-sm">
+                  {r.value} {r.unit} — {
+                    r.classification === "above" ? "SUPERIOR" :
+                    r.classification === "normal" ? "NORMAL" :
+                    r.classification === "below" ? "POR DEBAJO" : "—"
+                  }
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Risk Summary */}
+      <div className={`p-4 rounded-xl text-white ${risk.color}`}>
+        <span className="text-sm uppercase">Riesgo ECNT:</span>
+        <span className="text-2xl font-bold ml-3">{risk.level}</span>
+      </div>
+
+      {/* Safety Alert */}
+      {hasSafetyAlert && (
+        <div className="bg-red-100 border-2 border-red-400 rounded-xl p-3 text-red-800 font-semibold">
+          <AlertTriangle className="w-5 h-5 inline mr-2" />
+          Se registraron alertas de seguridad durante la evaluación.
+        </div>
+      )}
+
+      {/* Save Button */}
+      <div className="flex justify-center pt-4">
+        <Button variant="success" onClick={onSave} disabled={saving} className="!text-xl !px-8 !py-4">
+          {saving ? <Loader2 className="w-6 h-6 animate-spin inline mr-2" /> : <Save className="w-6 h-6 inline mr-2" />}
+          Guardar Evaluación
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ============ DATABASE VIEW ============
+function DatabaseView({ records, onEdit, onDelete, onExport, onNew }) {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h2 className="text-2xl font-bold text-slate-800">Base de Datos — Evaluaciones SFT</h2>
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="success" onClick={onNew} className="!text-base !px-3 !py-2">
+            + Nueva Evaluación
+          </Button>
+          <Button variant="secondary" onClick={() => onExport("csv")} className="!text-base !px-3 !py-2">
+            <Download className="w-4 h-4 inline mr-1" /> CSV
+          </Button>
+          <Button variant="secondary" onClick={() => onExport("xlsx")} className="!text-base !px-3 !py-2">
+            <Download className="w-4 h-4 inline mr-1" /> XLSX
+          </Button>
+        </div>
+      </div>
+
+      {records.length === 0 ? (
+        <Card>
+          <CardContent className="text-center py-12 text-slate-500">
+            <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            <p className="text-lg">No hay evaluaciones registradas.</p>
+            <p>Realice una nueva evaluación para comenzar.</p>
           </CardContent>
         </Card>
+      ) : (
+        <div className="space-y-3">
+          {records.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || "")).map(record => (
+            <Card key={record.id}>
+              <CardContent className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <p className="font-bold text-lg text-slate-800">{record.consent?.name || "Sin nombre"}</p>
+                  <p className="text-sm text-slate-500">
+                    Doc: {record.consent?.document} | {record.demographics?.age} años | {record.demographics?.sex}
+                    {record.timestamp && ` | ${new Date(record.timestamp).toLocaleDateString("es-CO")}`}
+                  </p>
+                  <div className="flex gap-2 mt-1 flex-wrap">
+                    {record.imcClass && (
+                      <span className="text-xs bg-slate-100 px-2 py-0.5 rounded">IMC: {record.imc} ({record.imcClass})</span>
+                    )}
+                    {record.ecntRisk && (
+                      <span className={`text-xs text-white px-2 py-0.5 rounded ${
+                        record.ecntRisk.level === "Muy Alto" || record.ecntRisk.level === "Alto" ? "bg-red-500" :
+                        record.ecntRisk.level === "Moderado" ? "bg-orange-500" :
+                        record.ecntRisk.level === "Bajo" ? "bg-yellow-500" : "bg-green-500"
+                      }`}>
+                        Riesgo: {record.ecntRisk.level}
+                      </span>
+                    )}
+                    {record.hasSafetyAlert && (
+                      <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">Alerta Seguridad</span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="secondary" onClick={() => onEdit(record)} className="!text-sm !px-3 !py-2">
+                    <Edit3 className="w-4 h-4" />
+                  </Button>
+                  <Button variant="danger" onClick={() => onDelete(record.id)} className="!text-sm !px-3 !py-2">
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <p className="text-center text-sm text-slate-400">
+        Total: {records.length} evaluaciones
+      </p>
+    </div>
+  );
+}
+
+// ============ EDIT VIEW ============
+function EditView({ record, setRecord, onSave, onCancel, saving }) {
+  const updateField = (path, value) => {
+    setRecord(r => {
+      const copy = { ...r };
+      const keys = path.split(".");
+      let ref = copy;
+      for (let i = 0; i < keys.length - 1; i++) {
+        ref[keys[i]] = { ...ref[keys[i]] };
+        ref = ref[keys[i]];
+      }
+      ref[keys[keys.length - 1]] = value;
+      return copy;
+    });
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold text-slate-800">Editar Registro</h2>
+        <Button variant="secondary" onClick={onCancel}>Cancelar</Button>
+      </div>
+
+      <Card>
+        <CardContent className="space-y-4">
+          <h3 className="font-semibold text-lg">Datos del Participante</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Nombre</label>
+              <input
+                type="text"
+                value={record.consent?.name || ""}
+                onChange={e => updateField("consent.name", e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Documento</label>
+              <input
+                type="text"
+                value={record.consent?.document || ""}
+                onChange={e => updateField("consent.document", e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Edad</label>
+              <input
+                type="number"
+                value={record.demographics?.age || ""}
+                onChange={e => updateField("demographics.age", e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Sexo</label>
+              <select
+                value={record.demographics?.sex || ""}
+                onChange={e => updateField("demographics.sex", e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+              >
+                <option value="">Seleccionar</option>
+                <option value="Masculino">Masculino</option>
+                <option value="Femenino">Femenino</option>
+              </select>
+            </div>
+          </div>
+
+          <h3 className="font-semibold text-lg mt-4">Antropometría</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Peso (kg)</label>
+              <input
+                type="number" step="0.1"
+                value={record.anthropometry?.weight || ""}
+                onChange={e => updateField("anthropometry.weight", e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Talla (cm)</label>
+              <input
+                type="number" step="0.1"
+                value={record.anthropometry?.height || ""}
+                onChange={e => updateField("anthropometry.height", e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">P. Cintura (cm)</label>
+              <input
+                type="number" step="0.1"
+                value={record.anthropometry?.waist || ""}
+                onChange={e => updateField("anthropometry.waist", e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">P. Pantorrilla (cm)</label>
+              <input
+                type="number" step="0.1"
+                value={record.anthropometry?.calf || ""}
+                onChange={e => updateField("anthropometry.calf", e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+              />
+            </div>
+          </div>
+
+          <h3 className="font-semibold text-lg mt-4">Datos SFT</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[
+              { key: "chairStand", label: "Chair Stand" },
+              { key: "armCurl", label: "Arm Curl" },
+              { key: "walkTest", label: "Walk 6min" },
+              { key: "stepTest", label: "Step 2min" },
+              { key: "sitReach", label: "Sit & Reach" },
+              { key: "backScratch", label: "Back Scratch" },
+              { key: "upAndGo", label: "Up & Go" },
+            ].map(f => (
+              <div key={f.key}>
+                <label className="block text-sm font-medium mb-1">{f.label}</label>
+                <input
+                  type="number" step="0.1"
+                  value={record.sftData?.[f.key] || ""}
+                  onChange={e => {
+                    const newSft = { ...(record.sftData || {}), [f.key]: e.target.value };
+                    setRecord(r => ({ ...r, sftData: newSft }));
+                  }}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="flex justify-end gap-3">
+        <Button variant="secondary" onClick={onCancel}>Cancelar</Button>
+        <Button variant="success" onClick={onSave} disabled={saving}>
+          {saving ? <Loader2 className="w-5 h-5 animate-spin inline mr-2" /> : <Save className="w-5 h-5 inline mr-2" />}
+          Guardar Cambios
+        </Button>
       </div>
     </div>
   );

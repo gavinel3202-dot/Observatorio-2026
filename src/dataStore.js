@@ -4,10 +4,12 @@ import {
   evaluacionesRef,
   addDoc,
   onSnapshot,
+  updateDocById,
+  deleteDocById,
 } from "./firebase";
 
-const LS_KEY = "icfg_evaluaciones";
-const LS_EVENT = "icfg_evaluaciones_updated";
+const LS_KEY = "sft_evaluaciones";
+const LS_EVENT = "sft_evaluaciones_updated";
 
 function readLocal() {
   try {
@@ -70,6 +72,36 @@ export async function addRecord(record) {
   }
   const records = readLocal();
   records.push({ id: `local-${Date.now()}`, ...record });
+  writeLocal(records);
+}
+
+/**
+ * Update an existing record.
+ */
+export async function updateRecord(id, data) {
+  if (firebaseEnabled) {
+    await signIn();
+    await updateDocById(id, data);
+    return;
+  }
+  const records = readLocal();
+  const idx = records.findIndex(r => r.id === id);
+  if (idx !== -1) {
+    records[idx] = { ...records[idx], ...data };
+    writeLocal(records);
+  }
+}
+
+/**
+ * Delete a record.
+ */
+export async function deleteRecord(id) {
+  if (firebaseEnabled) {
+    await signIn();
+    await deleteDocById(id);
+    return;
+  }
+  const records = readLocal().filter(r => r.id !== id);
   writeLocal(records);
 }
 
