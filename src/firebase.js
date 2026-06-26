@@ -5,6 +5,9 @@ import {
   collection,
   addDoc,
   onSnapshot,
+  doc,
+  updateDoc,
+  deleteDoc,
 } from "firebase/firestore";
 
 function readConfig() {
@@ -40,14 +43,14 @@ const app = firebaseConfig ? initializeApp(firebaseConfig) : null;
 export const firebaseEnabled = Boolean(app);
 export const auth = app ? getAuth(app) : null;
 export const db = app ? getFirestore(app) : null;
-export const appId = import.meta.env.VITE_APP_ID || "icfg-app-id";
+export const appId = import.meta.env.VITE_APP_ID || "sft-observatorio-2026";
 
 const COLLECTION_PATH = [
   "artifacts",
   appId,
   "public",
   "data",
-  "evaluaciones_icfg",
+  "evaluaciones_sft",
 ];
 
 let signInPromise = null;
@@ -66,6 +69,18 @@ export function signIn() {
 
 export function evaluacionesRef() {
   return collection(db, ...COLLECTION_PATH);
+}
+
+export async function updateDocById(docId, data) {
+  const docRef = doc(db, ...COLLECTION_PATH, docId);
+  const rest = { ...data };
+  delete rest.id;
+  await updateDoc(docRef, rest);
+}
+
+export async function deleteDocById(docId) {
+  const docRef = doc(db, ...COLLECTION_PATH, docId);
+  await deleteDoc(docRef);
 }
 
 export { addDoc, onSnapshot };
