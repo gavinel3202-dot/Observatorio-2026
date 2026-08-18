@@ -66,6 +66,8 @@ const Button = ({ children, onClick, variant = "primary", className = "", disabl
 const initialPerson = () => ({
   nombre: "",
   edad: "",
+  tipoDocumento: "",
+  NúmeroDocumento: "",
   sexo: "",
   sede: "",
   fecha: new Date().toISOString().slice(0, 10),
