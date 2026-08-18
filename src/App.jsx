@@ -368,7 +368,7 @@ r.weakest,
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-6">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-10">
                       <input
                         className="rounded-xl border p-3 md:col-span-2 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
                         placeholder="Nombre completo"
