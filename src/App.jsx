@@ -145,7 +145,16 @@ export default function App() {
   };
 
   const reset = () => {
-    setPerson((prev) => ({ ...prev, nombre: "", edad: "", sexo: "", peso: "", talla: "" }));
+    setPerson((prev) => ({
+  ...prev,
+  nombre: "",
+  tipoDocumento: "",
+  numeroDocumento: "",
+  edad: "",
+  sexo: "",
+  peso: "",
+  talla: ""
+}));
     setScores(initialScores);
   };
 
@@ -178,12 +187,26 @@ export default function App() {
 
   const exportCSV = () => {
     const headers = [
-      "FechaRegistro", "Evaluador", "Nombre", "Edad", "Sexo", "Peso(kg)", "Talla(cm)", "IMC", "Categoria_IMC", "Sede", "Puntaje_ICFG", "Clasificacion_ICFG", "Debilidad_Principal",
+   "FechaRegistro", "Evaluador", "Nombre", "TipoDocumento", "NumeroDocumento", "Edad", "Sexo", "Peso(kg)", "Talla(cm)", "IMC", "Categoria_IMC", "Sede", "Puntaje_ICFG", "Clasificacion_ICFG", "Debilidad_Principal",
       ...tests.map((t) => `${t.shortName} (${t.unit})`),
     ];
 
     const rows = records.map((r) => [
-      r.createdAt, r.evaluador, r.nombre, r.edad, r.sexo, r.peso || "", r.talla || "", r.imcValue || "", r.imcCategory || "", r.sede, r.total, r.classification, r.weakest,
+r.createdAt,
+r.evaluador,
+r.nombre,
+r.tipoDocumento || "",
+r.numeroDocumento || "",
+r.edad,
+r.sexo,
+r.peso || "",
+r.talla || "",
+r.imcValue || "",
+r.imcCategory || "",
+r.sede,
+r.total,
+r.classification,
+r.weakest,
       ...tests.map((t) => r.scores?.[t.id] || ""),
     ]);
 
@@ -351,7 +374,32 @@ export default function App() {
                         placeholder="Nombre completo"
                         value={person.nombre}
                         onChange={(e) => setPerson({ ...person, nombre: e.target.value })}
-                      />
+                        />
+                      <select
+  className="rounded-xl border p-3 outline-none transition focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+  value={person.tipoDocumento}
+  onChange={(e) =>
+    setPerson({ ...person, tipoDocumento: e.target.value })
+  }
+>
+  <option value="">Tipo de documento</option>
+  <option value="CC">Cédula de ciudadanía</option>
+  <option value="TI">Tarjeta de identidad</option>
+  <option value="CE">Cédula de extranjería</option>
+  <option value="PPT">Permiso por Protección Temporal</option>
+  <option value="PA">Pasaporte</option>
+  <option value="Otro">Otro</option>
+</select>
+
+<input
+  className="rounded-xl border p-3 outline-none transition focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+  placeholder="Número de documento"
+  type="text"
+  value={person.numeroDocumento}
+  onChange={(e) =>
+    setPerson({ ...person, numeroDocumento: e.target.value })
+  }
+/>
                       <input
                         className={`rounded-xl border p-3 outline-none transition ${
                           isAgeInvalid
@@ -618,13 +666,20 @@ export default function App() {
                         <td className="p-4 font-semibold text-slate-600 whitespace-nowrap">
                           {record.evaluador || "-"}
                         </td>
-                        <td className="p-4 font-bold text-slate-900">
-                          {record.nombre || "Sin nombre"}
-                          <span className="block text-xs font-normal text-slate-500 mt-1">
-                            {record.sexo && record.sexo !== "" ? `${record.sexo}, ` : ""}
-                            {record.edad ? `${record.edad} años` : ""}
-                          </span>
-                        </td>
+                 <td className="p-4 font-bold text-slate-900">
+  {record.nombre || "Sin nombre"}
+
+  <span className="block text-xs font-normal text-slate-500 mt-1">
+    {record.tipoDocumento && record.numeroDocumento
+      ? `${record.tipoDocumento}: ${record.numeroDocumento}`
+      : ""}
+  </span>
+
+  <span className="block text-xs font-normal text-slate-500 mt-1">
+    {record.sexo && record.sexo !== "" ? `${record.sexo}, ` : ""}
+    {record.edad ? `${record.edad} años` : ""}
+  </span>
+</td>
                         <td className="p-4">
                           {record.imcValue ? (
                             <div>
