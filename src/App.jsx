@@ -360,11 +360,11 @@ r.weakest,
                             ¡Requeridos para cálculos!
                           </span>
                         )}
-                        {isAgeInvalid && (
-                          <span className="text-xs font-bold bg-red-100 text-red-700 px-3 py-1 rounded-full animate-pulse">
-                            Rango válido: 18 a 69 años
-                          </span>
-                        )}
+                       {isAgeInvalid && (
+  <span className="text-xs font-bold bg-red-100 text-red-700 px-3 py-1 rounded-full animate-pulse">
+    Rango válido: 18 a 100 años
+  </span>
+)}
                       </div>
                     </div>
 
@@ -411,7 +411,7 @@ r.weakest,
                         placeholder="Edad"
                         type="number"
                         min="18"
-                        max="69"
+                        max="100"
                         value={person.edad}
                         onChange={(e) => setPerson({ ...person, edad: e.target.value })}
                       />
