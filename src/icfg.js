@@ -32,7 +32,7 @@ export const evaluateTest = (testId, rawValue, ageStr, sex) => {
   const age = Number(ageStr);
   const isHombre = sex === "Hombre";
 
- if (edad < 18 || edad > 100) return -2;
+  if (age < 18 || age > 100) return -2;
 
   switch (testId) {
     case "flexiones":
