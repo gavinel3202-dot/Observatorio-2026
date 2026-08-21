@@ -67,7 +67,7 @@ const initialPerson = () => ({
   nombre: "",
   edad: "",
   tipoDocumento: "",
-  NúmeroDocumento: "",
+  numeroDocumento: "",
   sexo: "",
   sede: "",
   fecha: new Date().toISOString().slice(0, 10),
