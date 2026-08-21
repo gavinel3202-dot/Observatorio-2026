@@ -224,7 +224,7 @@ r.weakest,
   };
 
   const isDemographicMissing = !person.edad || !person.sexo || person.sexo === "Otro / No reporta";
-  const isAgeInvalid = person.edad !== "" && (Number(person.edad) < 18 || Number(person.edad) > 69);
+  const isAgeInvalid = person.edad !== "" && (Number(person.edad) < 18 || Number(person.edad) > 100);
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 text-slate-900 md:p-8 font-sans">
