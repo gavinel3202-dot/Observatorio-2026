@@ -223,7 +223,191 @@ r.weakest,
     link.click();
     URL.revokeObjectURL(url);
   };
+const generatePDF = () => {
+  const doc = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: "a4",
+  });
 
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  // ENCABEZADO
+  doc.setFillColor(49, 46, 129);
+  doc.roundedRect(10, 10, pageWidth - 20, 30, 4, 4, "F");
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.text("Índice de Capacidad Funcional - ICFG", 16, 22);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text("Reporte individual de evaluación funcional", 16, 29);
+
+  doc.setTextColor(15, 23, 42);
+
+  // DATOS DEL USUARIO
+  let y = 50;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.text("Datos del usuario", 14, y);
+
+  y += 8;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+
+  doc.text(`Nombre: ${person.nombre || "-"}`, 14, y);
+  doc.text(
+    `Documento: ${person.tipoDocumento || "-"} ${person.numeroDocumento || ""}`,
+    105,
+    y
+  );
+
+  y += 6;
+  doc.text(`Edad: ${person.edad || "-"} años`, 14, y);
+  doc.text(`Sexo: ${person.sexo || "-"}`, 70, y);
+  doc.text(`Fecha: ${person.fecha || "-"}`, 125, y);
+
+  y += 6;
+  doc.text(`Sede / grupo: ${person.sede || "-"}`, 14, y);
+
+  y += 6;
+
+  if (imcData) {
+    doc.text(`IMC: ${imcData.value} - ${imcData.category}`, 14, y);
+  }
+
+  // RESULTADO GENERAL
+  y += 14;
+
+  doc.setFillColor(238, 242, 255);
+  doc.roundedRect(14, y, pageWidth - 28, 28, 3, 3, "F");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.text("Resultado ICFG", 20, y + 8);
+
+  doc.setFontSize(25);
+  doc.setTextColor(49, 46, 129);
+  doc.text(`${result.total}`, 20, y + 21);
+
+  doc.setFontSize(10);
+  doc.setTextColor(71, 85, 105);
+  doc.text("/ 100 puntos", 40, y + 21);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text(result.classification.label, 80, y + 14);
+
+  y += 38;
+
+  // RESULTADOS DE LAS PRUEBAS
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.text("Resultados de las pruebas", 14, y);
+
+  y += 8;
+
+  result.detail.forEach((test) => {
+    if (y > 260) {
+      doc.addPage();
+      y = 20;
+    }
+
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(14, y, pageWidth - 28, 16, 2, 2, "F");
+
+    doc.setTextColor(15, 23, 42);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text(test.name, 18, y + 6);
+
+    doc.setFont("helvetica", "normal");
+    doc.text(
+      `Resultado: ${test.rawInput || "-"} ${test.unit || ""}`,
+      18,
+      y + 12
+    );
+
+    doc.setFont("helvetica", "bold");
+
+    const resultado =
+      test.validScore > 0
+        ? `${test.validScore}/5 - ${getClassificationLabel(test.validScore)}`
+        : "Sin resultado";
+
+    doc.text(resultado, 120, y + 10);
+
+    y += 19;
+  });
+
+  // DEBILIDAD PRINCIPAL
+  if (y > 235) {
+    doc.addPage();
+    y = 20;
+  }
+
+  y += 5;
+
+  doc.setFillColor(255, 247, 237);
+  doc.roundedRect(14, y, pageWidth - 28, 25, 3, 3, "F");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(154, 52, 18);
+  doc.text("Debilidad principal detectada", 18, y + 8);
+
+  doc.setFontSize(10);
+  doc.setTextColor(15, 23, 42);
+  doc.text(result.weakest.name, 18, y + 17);
+
+  // ACCIÓN SUGERIDA
+  y += 32;
+
+  doc.setFillColor(236, 253, 245);
+  doc.roundedRect(14, y, pageWidth - 28, 32, 3, 3, "F");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(5, 150, 105);
+  doc.text("Acción sugerida", 18, y + 8);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(15, 23, 42);
+
+  const actionLines = doc.splitTextToSize(
+    result.classification.action,
+    pageWidth - 40
+  );
+
+  doc.text(actionLines, 18, y + 16);
+
+  // PIE DE PÁGINA
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  doc.text(
+    `Evaluador: ${evaluador || "No especificado"}`,
+    14,
+    290
+  );
+
+  doc.text(
+    "Índice de Capacidad Funcional - ICFG",
+    pageWidth - 14,
+    290,
+    { align: "right" }
+  );
+
+  const safeName = (person.nombre || "usuario")
+    .replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]/g, "")
+    .replaceAll(" ", "_");
+
+  doc.save(`ICFG_${safeName}_${person.fecha}.pdf`);
+};
   const isDemographicMissing = !person.edad || !person.sexo || person.sexo === "Otro / No reporta";
   const isAgeInvalid = person.edad !== "" && (Number(person.edad) < 18 || Number(person.edad) > 100);
 
@@ -612,6 +796,15 @@ r.weakest,
                       </>
                     )}
                   </Button>
+                 <Button
+  className="w-full shadow-sm"
+  onClick={generatePDF}
+  variant="secondary"
+  disabled={isAgeInvalid || result.total === 0}
+>
+  <ClipboardList size={18} />
+  Generar reporte PDF
+</Button>
                   <Button className="w-full shadow-sm" onClick={reset} variant="secondary" disabled={isSaving}>
                     <RotateCcw size={18} /> Limpiar formulario
                   </Button>
