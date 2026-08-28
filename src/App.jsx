@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect } from "react";
+import jsPDF from "jspdf";
 import {
   UserRound,
   RotateCcw,
