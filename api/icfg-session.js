@@ -9,6 +9,7 @@ import {
   normalizeTrainerCode, verifyInstitutionalPassword, issueTrainerToken,
 } from "./_lib/institutionalAuth.js";
 import { trainerDirectory } from "./_lib/trainerDirectory.js";
+import { loginRateLimiter } from "./_lib/loginRateLimiter.js";
 
 function firestoreAdmin() {
   const credentials = process.env.FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON;
@@ -49,12 +50,25 @@ export default async function handler(req, res) {
       throw new Error("Credenciales institucionales no configuradas.");
     }
 
+    const ip = req.socket?.remoteAddress || "unknown";
+    const limiter = loginRateLimiter(firestoreAdmin(), process.env.ICFG_RATE_LIMIT_SECRET);
+    const limit = await limiter.check(ip, code);
+    if (!limit.allowed) {
+      res.setHeader("Retry-After", String(limit.retryAfterSeconds));
+      return res.status(429).json({ error: "Demasiados intentos. Inténtalo más tarde." });
+    }
+
     // Verificar hash primero y usar un mensaje genérico para no revelar códigos.
     if (!verifyInstitutionalPassword(password, hash)) {
+      await limiter.recordFailure(ip, code);
       return res.status(401).json({ error: "Credenciales inválidas." });
     }
     const trainer = await trainerDirectory(firestoreAdmin()).getActive(code);
-    if (!trainer) return res.status(401).json({ error: "Credenciales inválidas." });
+    if (!trainer) {
+      await limiter.recordFailure(ip, code);
+      return res.status(401).json({ error: "Credenciales inválidas." });
+    }
+    await limiter.recordSuccess(ip, code);
     const token = issueTrainerToken({ code, secret, epoch });
     return res.status(200).json({
       token, expiresInSeconds: 900, code: trainer.code,
