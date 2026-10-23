@@ -5,8 +5,10 @@ Estado: **NO APTO PARA PRODUCCIÓN**.
 El endpoint `api/icfg-session.js` responde 503 por defecto, salvo que el servidor tenga `ICFG_SESSION_ENABLED=true`. **No activar esa variable todavía**.
 
 ## Bloqueos técnicos
-- Incorporar y fijar dependencia `firebase-admin`, generar lockfile y comprobar despliegue Vercel.
-- Añadir protección persistente contra fuerza bruta (IP y código, en servidor) antes de habilitar el endpoint.
+- [x] Incorporar `firebase-admin` (14.5.0) y lockfile. GitHub Actions: `npm ci`, 12 pruebas y `npm run build` aprobados; vista previa Vercel en estado READY.
+- [ ] Comprobar ejecución real del endpoint con una solicitud autenticada a la vista previa: Vercel Deployment Protection responde HTTP 401 a solicitudes anónimas. Un READY no prueba por sí solo la función HTTP.
+- [x] Implementar protección persistente contra intentos repetidos por IP y código (lógica y pruebas locales aprobadas).
+- [ ] Probar contadores transaccionales y la IP de cliente con Firebase real en entorno aislado antes de activar.
 - Configurar credenciales Firebase Admin y secretos exclusivamente en el entorno de servidor, nunca como variables `VITE_*`.
 - Crear una identidad administrativa separada con MFA y un proceso de altas/bajas de formadores.
 - Probar la autenticación con datos ficticios en un proyecto Firebase de pruebas.
