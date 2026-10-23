@@ -3,17 +3,18 @@
  * REQUIERE configurar variables de servidor y firebase-admin antes de desplegar.
  * No incluir secretos en VITE_*.
  */
-import { initializeApp, cert, getApps } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
 import {
   normalizeTrainerCode, verifyInstitutionalPassword, issueTrainerToken,
 } from "./_lib/institutionalAuth.js";
 import { trainerDirectory } from "./_lib/trainerDirectory.js";
 import { loginRateLimiter } from "./_lib/loginRateLimiter.js";
 
-function firestoreAdmin() {
+async function firestoreAdmin() {
   const credentials = process.env.FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON;
   if (!credentials) throw new Error("Firebase Admin no configurado.");
+  const [{ initializeApp, cert, getApps }, { getFirestore }] = await Promise.all([
+    import("firebase-admin/app"), import("firebase-admin/firestore"),
+  ]);
   if (!getApps().length) initializeApp({ credential: cert(JSON.parse(credentials)) });
   return getFirestore();
 }
@@ -50,8 +51,14 @@ export default async function handler(req, res) {
       throw new Error("Credenciales institucionales no configuradas.");
     }
 
-    const ip = req.socket?.remoteAddress || "unknown";
-    const limiter = loginRateLimiter(firestoreAdmin(), process.env.ICFG_RATE_LIMIT_SECRET);
+    // En Vercel, el proxy sustituye X-Forwarded-For para evitar IP simuladas.
+    // No confiar en cabeceras forward desde un servidor local sin proxy confiable.
+    const forwarded = process.env.VERCEL === "1"
+      ? (req.headers?.["x-vercel-forwarded-for"] || req.headers?.["x-forwarded-for"])
+      : null;
+    const ip = String(forwarded || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
+    const adminDb = await firestoreAdmin();
+    const limiter = loginRateLimiter(adminDb, process.env.ICFG_RATE_LIMIT_SECRET);
     const limit = await limiter.check(ip, code);
     if (!limit.allowed) {
       res.setHeader("Retry-After", String(limit.retryAfterSeconds));
@@ -63,7 +70,7 @@ export default async function handler(req, res) {
       await limiter.recordFailure(ip, code);
       return res.status(401).json({ error: "Credenciales inválidas." });
     }
-    const trainer = await trainerDirectory(firestoreAdmin()).getActive(code);
+    const trainer = await trainerDirectory(adminDb).getActive(code);
     if (!trainer) {
       await limiter.recordFailure(ip, code);
       return res.status(401).json({ error: "Credenciales inválidas." });
