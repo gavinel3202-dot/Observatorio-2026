@@ -1,0 +1,24 @@
+name: Pruebas de seguridad ICFG
+on:
+  push:
+    branches:
+      - feature/edicion-evaluaciones-autorizadas
+  pull_request:
+    paths:
+      - 'api/_lib/**'
+      - 'tests/**'
+      - '.github/workflows/icfg-security-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  security-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Ejecutar pruebas de seguridad sin Firebase de producción
+        run: node --test tests/*.test.js
