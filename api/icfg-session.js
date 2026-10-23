@@ -4,10 +4,11 @@
  * No incluir secretos en VITE_*.
  */
 import {
-  normalizeTrainerCode, verifyInstitutionalPassword, issueTrainerToken,
+  normalizeTrainerCode,
 } from "./_lib/institutionalAuth.js";
 import { trainerDirectory } from "./_lib/trainerDirectory.js";
 import { loginRateLimiter } from "./_lib/loginRateLimiter.js";
+import { authenticateTrainer } from "./_lib/authenticateTrainer.js";
 
 async function firestoreAdmin() {
   const credentials = process.env.FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON;
@@ -59,27 +60,14 @@ export default async function handler(req, res) {
     const ip = String(forwarded || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
     const adminDb = await firestoreAdmin();
     const limiter = loginRateLimiter(adminDb, process.env.ICFG_RATE_LIMIT_SECRET);
-    const limit = await limiter.check(ip, code);
-    if (!limit.allowed) {
-      res.setHeader("Retry-After", String(limit.retryAfterSeconds));
-      return res.status(429).json({ error: "Demasiados intentos. Inténtalo más tarde." });
-    }
-
-    // Verificar hash primero y usar un mensaje genérico para no revelar códigos.
-    if (!verifyInstitutionalPassword(password, hash)) {
-      await limiter.recordFailure(ip, code);
-      return res.status(401).json({ error: "Credenciales inválidas." });
-    }
-    const trainer = await trainerDirectory(adminDb).getActive(code);
-    if (!trainer) {
-      await limiter.recordFailure(ip, code);
-      return res.status(401).json({ error: "Credenciales inválidas." });
-    }
-    await limiter.recordSuccess(ip, code);
-    const token = issueTrainerToken({ code, secret, epoch });
-    return res.status(200).json({
-      token, expiresInSeconds: 900, code: trainer.code,
+    const result = await authenticateTrainer({
+      code, password, ip, hash, sessionSecret: secret, epoch,
+      limiter, directory: trainerDirectory(adminDb),
     });
+    if (result.retryAfterSeconds) {
+      res.setHeader("Retry-After", String(result.retryAfterSeconds));
+    }
+    return res.status(result.status).json(result.body);
   } catch (error) {
     console.error("No se pudo completar la autenticación institucional:", error.message);
     return res.status(503).json({ error: "Servicio de acceso no disponible." });
