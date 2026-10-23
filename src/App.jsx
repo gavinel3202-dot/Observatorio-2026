@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from "react";
 import jsPDF from "jspdf";
+import CorrectionPreview from "./CorrectionPreview";
 import {
   UserRound,
   RotateCcw,
@@ -461,6 +462,7 @@ const generatePDF = () => {
           {[
             { id: "evaluacion", label: "Nueva Evaluación", icon: ClipboardList },
             { id: "seguimiento", label: "Seguimiento", icon: TrendingUp },
+            { id: "correccion", label: "Corrección (prueba)", icon: ClipboardList },
           ].map((tab) => {
             const Icon = tab.icon;
             return (
@@ -479,7 +481,9 @@ const generatePDF = () => {
           })}
         </div>
 
-        {activeTab === "seguimiento" ? (
+        {activeTab === "correccion" ? (
+          <CorrectionPreview records={records} />
+        ) : activeTab === "seguimiento" ? (
           <Card>
             <CardContent>
               <h2 className="mb-1 flex items-center gap-2 text-xl font-bold">
