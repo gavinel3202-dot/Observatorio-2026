@@ -1,0 +1,28 @@
+name: Diagnóstico HTTP Vercel ICFG
+on:
+  workflow_dispatch:
+
+jobs:
+  preview-http:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Consultar endpoint sin credenciales ni escrituras
+        env:
+          PREVIEW_URL: https://observatorio-2026-git-feature-4d0a73-gavinel3202-dots-projects.vercel.app
+        run: |
+          set -eu
+          code=$(curl -sS --max-time 20 -o response.txt -w '%{http_code}' \
+            -X POST "$PREVIEW_URL/api/icfg-session" \
+            -H 'Content-Type: application/json' \
+            --data '{"code":"DIAGNOSTICO","password":"NO_ES_UNA_CREDENCIAL"}')
+          echo "HTTP status: $code"
+          if [ "$code" = 503 ]; then
+            echo "Endpoint bloqueado como se esperaba."
+          elif [ "$code" = 401 ] || [ "$code" = 403 ]; then
+            echo "Preview protegida; no se pudo probar el endpoint."
+          else
+            echo "Respuesta inesperada. Revisar despliegue, dependencia firebase-admin y configuración."
+            exit 1
+          fi
