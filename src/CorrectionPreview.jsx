@@ -1,20 +1,28 @@
 import { useMemo, useState } from "react";
 import { tests } from "./icfg";
 import { prepareCorrection, EDITABLE_PERSON_FIELDS } from "./correctionDraft";
+import {
+  createTrainerSession, submitCorrection, changedFieldsFromAudit,
+} from "./icfgCorrectionClient";
 
-/**
- * Vista previa exclusivamente: NO escribe en Firebase.
- * La autenticación y la autorización deben implementarse antes de habilitar guardado.
- */
+// Solo un interruptor de interfaz. La autorización REAL sigue en el servidor.
+// No habilitar VITE_ICFG_CORRECTION_ACCESS hasta las pruebas institucionales.
+const ACCESS_UI_ENABLED = import.meta.env.VITE_ICFG_CORRECTION_ACCESS === "true";
+
 export default function CorrectionPreview({ records }) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [person, setPerson] = useState({});
   const [scores, setScores] = useState({});
-  const [actor, setActor] = useState("");
+  const [actorDraft, setActorDraft] = useState("");
   const [reason, setReason] = useState("");
   const [preview, setPreview] = useState(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
+  const [session, setSession] = useState(null);
+  const [busy, setBusy] = useState(false);
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -25,6 +33,7 @@ export default function CorrectionPreview({ records }) {
     ).slice(0, 20);
   }, [records, query]);
   const selected = records.find((r) => r.id === selectedId);
+  const hasSession = Boolean(session && session.expiresAt > Date.now());
 
   const selectRecord = (r) => {
     setSelectedId(r.id);
@@ -32,16 +41,67 @@ export default function CorrectionPreview({ records }) {
     setScores(Object.fromEntries(tests.map((t) => [t.id, r.scores?.[t.id] ?? ""])));
     setPreview(null);
     setError("");
+    setNotice("");
     setReason("");
   };
 
   const calculate = () => {
     try {
-      setPreview(prepareCorrection(selected, { person, scores }, actor, reason));
+      const actor = ACCESS_UI_ENABLED ? (session?.code || "BORRADOR") : actorDraft;
+      const proposal = prepareCorrection(selected, { person, scores }, actor, reason);
+      setPreview({ ...proposal, expectedRevision: selected.revision ?? 0 });
       setError("");
+      setNotice("");
     } catch (e) {
       setError(e.message);
       setPreview(null);
+    }
+  };
+
+  const login = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await createTrainerSession(code.trim(), password);
+      if (!result?.token || !result?.code) throw new Error("Respuesta de sesión inválida.");
+      setSession({
+        token: result.token, code: result.code,
+        expiresAt: Date.now() + Number(result.expiresInSeconds || 900) * 1000,
+      });
+      setPreview(null);
+      setNotice("Formador autorizado. La sesión es temporal.");
+    } catch (e) {
+      setSession(null);
+      setError(e.message);
+    } finally {
+      setPassword("");
+      setBusy(false);
+    }
+  };
+
+  const save = async () => {
+    if (!ACCESS_UI_ENABLED || !hasSession || !preview || !selected) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const saved = await submitCorrection(session.token, {
+        documentId: selected.id,
+        expectedRevision: preview.expectedRevision,
+        changes: changedFieldsFromAudit(preview.auditDraft.after),
+        reason,
+      });
+      setNotice(`Corrección guardada con auditoría. Revisión: ${saved.revision}.`);
+      setPreview(null);
+      setSelectedId("");
+      setReason("");
+    } catch (e) {
+      if (e.status === 401 || e.status === 403) setSession(null);
+      setError(e.message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -53,11 +113,46 @@ export default function CorrectionPreview({ records }) {
 
   return (
     <section className="rounded-2xl border bg-white p-5 shadow-sm space-y-4">
-      <h2 className="text-xl font-bold">Corrección de evaluaciones — vista previa</h2>
-      <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-        Modo de prueba: esta pantalla NO guarda cambios. La edición real requiere
-        autenticación individual, permisos en servidor y auditoría.
-      </p>
+      <h2 className="text-xl font-bold">
+        {ACCESS_UI_ENABLED ? "Corrección de evaluaciones" : "Corrección de evaluaciones — vista previa"}
+      </h2>
+      {!ACCESS_UI_ENABLED && (
+        <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          Modo de prueba: esta pantalla NO guarda cambios. La edición real requiere
+          contraseña institucional, identificación del formador, permisos del servidor y auditoría.
+        </p>
+      )}
+      {ACCESS_UI_ENABLED && (
+        <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+          {hasSession ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <span>Sesión de formador: <strong>{session.code}</strong> (vigencia máxima 15 minutos)</span>
+              <button type="button" className="rounded-lg border px-3 py-1"
+                onClick={() => { setSession(null); setPreview(null); setNotice("Sesión cerrada."); }}>
+                Cerrar sesión
+              </button>
+            </div>
+          ) : (
+            <form className="grid grid-cols-1 gap-3 sm:grid-cols-3" onSubmit={login}>
+              <label className="text-sm font-semibold">Código institucional individual
+                <input className="mt-1 w-full rounded-lg border p-2" required
+                  value={code} autoComplete="username"
+                  onChange={(e) => setCode(e.target.value)} />
+              </label>
+              <label className="text-sm font-semibold">Contraseña institucional compartida
+                <input type="password" className="mt-1 w-full rounded-lg border p-2" required
+                  value={password} autoComplete="off"
+                  onChange={(e) => setPassword(e.target.value)} />
+              </label>
+              <button type="submit" disabled={busy}
+                className="self-end rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white disabled:opacity-50">
+                {busy ? "Verificando…" : "Ingresar"}
+              </button>
+            </form>
+          )}
+        </div>
+      )}
+      {notice && <p role="status" className="rounded-lg bg-green-50 p-3 text-green-800">{notice}</p>}
       <label className="block text-sm font-semibold">
         Buscar evaluación por documento o nombre
         <input className="mt-1 w-full rounded-xl border p-3" value={query}
@@ -101,12 +196,14 @@ export default function CorrectionPreview({ records }) {
             ))}
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <label className="text-sm font-semibold">Identificación del formador (borrador)
-              <input className="mt-1 w-full rounded-lg border p-2" value={actor}
-                onChange={(e) => { setActor(e.target.value); setPreview(null); }} />
-            </label>
+            {!ACCESS_UI_ENABLED && (
+              <label className="text-sm font-semibold">Identificación del formador (borrador)
+                <input className="mt-1 w-full rounded-lg border p-2" value={actorDraft}
+                  onChange={(e) => { setActorDraft(e.target.value); setPreview(null); }} />
+              </label>
+            )}
             <label className="text-sm font-semibold">Motivo de la corrección
-              <input className="mt-1 w-full rounded-lg border p-2" value={reason}
+              <input className="mt-1 w-full rounded-lg border p-2" value={reason} maxLength={500}
                 onChange={(e) => { setReason(e.target.value); setPreview(null); }} />
             </label>
           </div>
@@ -128,9 +225,15 @@ export default function CorrectionPreview({ records }) {
                   </li>
                 ))}
               </ul>
-              <button type="button" disabled
-                className="rounded-lg bg-slate-200 px-4 py-2 text-slate-600">
-                Guardar corrección (no disponible en modo de prueba)
+              <button type="button"
+                disabled={!ACCESS_UI_ENABLED || !hasSession || busy}
+                onClick={save}
+                className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white disabled:bg-slate-200 disabled:text-slate-600">
+                {!ACCESS_UI_ENABLED
+                  ? "Guardar corrección (no disponible en modo de prueba)"
+                  : !hasSession
+                  ? "Ingresa con tu código para guardar"
+                  : busy ? "Guardando…" : "Guardar corrección con auditoría"}
               </button>
             </div>
           )}
