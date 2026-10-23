@@ -100,3 +100,43 @@ test("cinco errores de contraseña bloquean IP y código", async () => {
   assert.equal(blocked.code, 429);
   assert.ok(Number(blocked.headers["retry-after"]) > 0);
 });
+
+
+test("administrador: alta y suspensión con auditoría real en Firestore Emulator", async () => {
+  const { firestore, serverTimestamp } = await adminFirestore();
+  const admin = { uid: "UID_ADMIN_DEMO", role: "admin", mfaVerified: true };
+  const { getTrainerForAdmin, setTrainerByAdmin } = await import("../api/_lib/adminTrainerService.js");
+  const code = "F200";
+  const create = await setTrainerByAdmin({
+    firestore, serverTimestamp, admin, code,
+    displayName: "Formador Ficticio", active: true, expectedRevision: 0,
+    reason: "Alta de prueba autorizada por administración",
+  });
+  assert.equal(create.revision, 1);
+  const lookup = await getTrainerForAdmin({ firestore, admin, code });
+  assert.equal(lookup.active, true);
+  const suspend = await setTrainerByAdmin({
+    firestore, serverTimestamp, admin, code,
+    displayName: "Formador Ficticio", active: false, expectedRevision: 1,
+    reason: "Suspensión ficticia autorizada por administración",
+  });
+  assert.equal(suspend.revision, 2);
+  assert.equal((await getTrainerForAdmin({ firestore, admin, code })).active, false);
+  const audit = await firestore.collection("icfg_formadores_audit_private")
+    .where("formadorCode", "==", code).get();
+  assert.equal(audit.size, 2);
+  for (const doc of audit.docs) {
+    assert.equal(doc.data().adminUid, admin.uid);
+    assert.ok(doc.data().timestamp?.toDate);
+  }
+  await assert.rejects(
+    setTrainerByAdmin({
+      firestore, serverTimestamp, admin, code,
+      displayName: "Formador Ficticio", active: true, expectedRevision: 1,
+      reason: "Reactivación con versión obsoleta",
+    }),
+    (error) => error.status === 409
+  );
+  // No se hizo ningún borrado físico.
+  assert.equal((await firestore.collection("icfg_formadores_privados").doc(code).get()).exists, true);
+});
