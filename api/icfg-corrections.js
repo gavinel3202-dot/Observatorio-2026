@@ -3,19 +3,12 @@
  * Activar SOLO en un proyecto Firebase de pruebas con reglas y respaldos
  * verificados. No usa las credenciales anónimas del navegador.
  */
+import { adminFirestore } from "./_lib/firebaseAdmin.js";
 import { verifyTrainerToken } from "./_lib/institutionalAuth.js";
 import { trainerDirectory } from "./_lib/trainerDirectory.js";
 import { correctEvaluation, CorrectionError } from "./_lib/correctionService.js";
 
-async function firestoreAdmin() {
-  const credentials = process.env.FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON;
-  if (!credentials) throw new Error("Firebase Admin no configurado.");
-  const [{ initializeApp, cert, getApps }, { getFirestore, FieldValue }] = await Promise.all([
-    import("firebase-admin/app"), import("firebase-admin/firestore"),
-  ]);
-  if (!getApps().length) initializeApp({ credential: cert(JSON.parse(credentials)) });
-  return { firestore: getFirestore(), serverTimestamp: () => FieldValue.serverTimestamp() };
-}
+
 
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -47,7 +40,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Solicitud inválida." });
     }
 
-    const { firestore, serverTimestamp } = await firestoreAdmin();
+    const { firestore, serverTimestamp } = await adminFirestore();
     const active = await trainerDirectory(firestore).getActive(claims.code);
     if (!active) return res.status(403).json({ error: "Formador no autorizado." });
 
