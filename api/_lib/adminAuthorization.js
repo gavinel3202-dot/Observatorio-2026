@@ -35,7 +35,7 @@ export async function verifyAdministrator({
   if (token.uid !== allowedUid ||
       token.icfgAdmin !== true ||
       token.email_verified !== true ||
-      token.firebase?.sign_in_provider === "anonymous" ||
+      token.firebase?.sign_in_provider !== "password" ||
       typeof token.firebase?.sign_in_second_factor !== "string" ||
       token.firebase.sign_in_second_factor.length === 0) {
     throw new AdminAccessError();
