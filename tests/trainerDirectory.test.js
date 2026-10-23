@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { trainerDirectory } from "../api/_lib/trainerDirectory.js";
 
 function fakeFirestore() {
-  const data = new Map();
+  const data = new Map([
+    ["F001", { active: true, role: "formador", displayName: "Formador DEMO" }],
+    ["F002", { active: false, role: "formador", displayName: "Suspendido" }],
+    ["F003", { active: true, role: "admin", displayName: "Rol distinto" }],
+  ]);
   return {
     collection(name) {
       assert.equal(name, "icfg_formadores_privados");
@@ -13,9 +17,6 @@ function fakeFirestore() {
             async get() {
               return { exists: data.has(code), data: () => data.get(code) };
             },
-            async set(value, { merge }) {
-              data.set(code, merge ? { ...(data.get(code) || {}), ...value } : value);
-            },
           };
         },
       };
@@ -23,25 +24,22 @@ function fakeFirestore() {
   };
 }
 
-test("solo administrador con MFA puede activar formadores", async () => {
+test("formador activo es reconocido por código individual", async () => {
   const dir = trainerDirectory(fakeFirestore());
-  await assert.rejects(
-    dir.upsertByAdmin("F001", { displayName: "Formador Prueba", active: true }, { role: "formador" })
-  );
-  await assert.rejects(
-    dir.upsertByAdmin("F001", { displayName: "Formador Prueba", active: true }, { role: "admin" })
-  );
-  assert.equal(await dir.getActive("F001"), null);
-  await dir.upsertByAdmin("F001", { displayName: "Formador Prueba", active: true },
-    { role: "admin", mfaVerified: true, uid: "admin1" });
   assert.equal((await dir.getActive("f001")).code, "F001");
+  assert.equal((await dir.assertActive("F001")).displayName, "Formador DEMO");
 });
 
-test("formador suspendido deja de estar autorizado", async () => {
+test("formador suspendido, rol distinto e identificadores inválidos se rechazan", async () => {
   const dir = trainerDirectory(fakeFirestore());
-  const admin = { role: "admin", mfaVerified: true, uid: "admin1" };
-  await dir.upsertByAdmin("F002", { displayName: "Formador Prueba", active: true }, admin);
-  await dir.upsertByAdmin("F002", { displayName: "Formador Prueba", active: false }, admin);
   assert.equal(await dir.getActive("F002"), null);
-  await assert.rejects(dir.assertActive("F002"));
+  assert.equal(await dir.getActive("F003"), null);
+  assert.equal(await dir.getActive("!"), null);
+  await assert.rejects(dir.assertActive("F002"), /no autorizado/);
+});
+
+test("directorio de lectura no expone funciones de modificación", () => {
+  const dir = trainerDirectory(fakeFirestore());
+  assert.equal(dir.upsertByAdmin, undefined);
+  assert.equal(dir.delete, undefined);
 });
