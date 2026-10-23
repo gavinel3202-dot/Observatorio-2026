@@ -20,8 +20,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Instalar dependencias reproducibles
+        run: npm ci
       - name: Ejecutar pruebas de seguridad sin Firebase de producción
         run: node --test tests/*.test.js
+      - name: Compilar la aplicación
+        run: npm run build
 
   preview-http:
     runs-on: ubuntu-latest
