@@ -142,7 +142,10 @@ export default function AdminFormadores() {
         : "Código disponible. Complete el nombre para registrar un nuevo formador.");
     } catch (err) {
       setError(friendlyError(err));
-      if ([401, 403].includes(err.status)) await logout();
+      if ([401, 403].includes(err.status)) {
+        await logout();
+        setError("Sesión administrativa vencida o acceso denegado. Inicie sesión nuevamente.");
+      }
     } finally {
       setBusy(false);
     }
