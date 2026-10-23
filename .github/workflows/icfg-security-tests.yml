@@ -74,4 +74,4 @@ jobs:
           npx --yes firebase-tools@14 emulators:exec
           --only firestore --project demo-icfg-corrections
           --config firebase.emulator.json
-          "node --test tests/firestoreEmulator.integration.js"
+          "node --test tests/firestoreEmulator.integration.js tests/icfgApi.emulator.integration.js"
