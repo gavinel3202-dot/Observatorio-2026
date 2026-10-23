@@ -3,7 +3,7 @@
  * Funciones puras: no escriben en Firestore ni conceden permisos.
  * El servidor deberá volver a validar y recalcular antes de persistir.
  */
-import { tests, evaluateTest, classifyICFG, getIMCData } from "./icfg";
+import { tests, evaluateTest, classifyICFG, getIMCData } from "./icfg.js";
 
 export const EDITABLE_PERSON_FIELDS = Object.freeze([
   "nombre", "edad", "tipoDocumento", "numeroDocumento", "sexo",
