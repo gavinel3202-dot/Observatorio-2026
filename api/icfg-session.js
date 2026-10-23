@@ -3,6 +3,7 @@
  * REQUIERE configurar variables de servidor y firebase-admin antes de desplegar.
  * No incluir secretos en VITE_*.
  */
+import { adminFirestore } from "./_lib/firebaseAdmin.js";
 import {
   normalizeTrainerCode,
 } from "./_lib/institutionalAuth.js";
@@ -10,15 +11,7 @@ import { trainerDirectory } from "./_lib/trainerDirectory.js";
 import { loginRateLimiter } from "./_lib/loginRateLimiter.js";
 import { authenticateTrainer } from "./_lib/authenticateTrainer.js";
 
-async function firestoreAdmin() {
-  const credentials = process.env.FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON;
-  if (!credentials) throw new Error("Firebase Admin no configurado.");
-  const [{ initializeApp, cert, getApps }, { getFirestore }] = await Promise.all([
-    import("firebase-admin/app"), import("firebase-admin/firestore"),
-  ]);
-  if (!getApps().length) initializeApp({ credential: cert(JSON.parse(credentials)) });
-  return getFirestore();
-}
+
 
 function configuredEpoch() {
   const raw = process.env.ICFG_SESSION_EPOCH;
@@ -58,7 +51,7 @@ export default async function handler(req, res) {
       ? (req.headers?.["x-vercel-forwarded-for"] || req.headers?.["x-forwarded-for"])
       : null;
     const ip = String(forwarded || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
-    const adminDb = await firestoreAdmin();
+    const { firestore: adminDb } = await adminFirestore();
     const limiter = loginRateLimiter(adminDb, process.env.ICFG_RATE_LIMIT_SECRET);
     const result = await authenticateTrainer({
       code, password, ip, hash, sessionSecret: secret, epoch,
