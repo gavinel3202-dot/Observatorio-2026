@@ -25,6 +25,11 @@ function configuredEpoch() {
 
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
+  // Bloqueo preventivo: endpoint inaccesible hasta revisión de controles
+  // de abuso, secretos, despliegue y pruebas en entorno aislado.
+  if (process.env.ICFG_SESSION_ENABLED !== "true") {
+    return res.status(503).json({ error: "Acceso institucional aún no habilitado." });
+  }
   res.setHeader("X-Content-Type-Options", "nosniff");
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
