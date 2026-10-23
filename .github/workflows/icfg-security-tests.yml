@@ -22,3 +22,27 @@ jobs:
           node-version: '22'
       - name: Ejecutar pruebas de seguridad sin Firebase de producción
         run: node --test tests/*.test.js
+
+  preview-http:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Comprobar acceso HTTP Vercel sin escrituras
+        env:
+          PREVIEW_URL: https://observatorio-2026-git-feature-4d0a73-gavinel3202-dots-projects.vercel.app
+        run: |
+          set -eu
+          status=$(curl -sS --max-time 30 -o response.txt -w '%{http_code}' \
+            -X POST "$PREVIEW_URL/api/icfg-session" \
+            -H 'Content-Type: application/json' \
+            --data '{"code":"DIAGNOSTICO","password":"NO_ES_UNA_CREDENCIAL"}')
+          echo "HTTP status: $status"
+          if [ "$status" = "503" ]; then
+            echo "APROBADO: el servicio permanece bloqueado."
+          elif [ "$status" = "401" ] || [ "$status" = "403" ]; then
+            echo "INCONCLUSO: la protección de Vercel puede impedir consultar la función."
+          else
+            echo "FALLO: estado inesperado (revisar build, rutas y dependencias del backend)."
+            exit 1
+          fi
