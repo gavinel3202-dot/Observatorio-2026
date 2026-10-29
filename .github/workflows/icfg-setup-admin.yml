@@ -1,0 +1,38 @@
+name: Preparar dependencia del servidor ICFG
+on:
+  push:
+    branches:
+      - feature/edicion-evaluaciones-autorizadas
+    paths:
+      - '.github/workflows/icfg-setup-admin.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  install-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Incorporar Firebase Admin y actualizar el archivo de dependencias
+        run: npm install firebase-admin@14.5.0 --save-exact
+      - name: Comprobar instalación reproducible
+        run: npm ci
+      - name: Verificar pruebas de seguridad
+        run: node --test tests/*.test.js
+      - name: Verificar compilación
+        run: npm run build
+      - name: Guardar dependencia en rama de desarrollo solamente
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "build: registrar firebase-admin y lockfile para servicio ICFG"
+            git push origin HEAD:feature/edicion-evaluaciones-autorizadas
+          fi

@@ -1,0 +1,77 @@
+name: Pruebas de seguridad ICFG
+on:
+  push:
+    branches:
+      - feature/edicion-evaluaciones-autorizadas
+  pull_request:
+    paths:
+      - 'api/_lib/**'
+      - 'tests/**'
+      - '.github/workflows/icfg-security-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  security-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar dependencias reproducibles
+        run: npm ci
+      - name: Ejecutar pruebas de seguridad sin Firebase de producción
+        run: node --test tests/*.test.js
+      - name: Compilar la aplicación
+        run: npm run build
+
+  preview-http:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Comprobar acceso HTTP Vercel sin escrituras
+        env:
+          PREVIEW_URL: https://observatorio-2026-git-feature-4d0a73-gavinel3202-dots-projects.vercel.app
+        run: |
+          set -eu
+          status=$(curl -sS --max-time 30 -o response.txt -w '%{http_code}' \
+            -X POST "$PREVIEW_URL/api/icfg-session" \
+            -H 'Content-Type: application/json' \
+            --data '{"code":"DIAGNOSTICO","password":"NO_ES_UNA_CREDENCIAL"}')
+          echo "HTTP status: $status"
+          if [ "$status" = "503" ]; then
+            echo "APROBADO: el servicio permanece bloqueado."
+          elif [ "$status" = "401" ] || [ "$status" = "403" ]; then
+            echo "INCONCLUSO: la protección de Vercel puede impedir consultar la función."
+          else
+            echo "FALLO: estado inesperado (revisar build, rutas y dependencias del backend)."
+            exit 1
+          fi
+
+  integration-emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Probar transacciones reales de Firestore en emulador aislado
+        env:
+          GCLOUD_PROJECT: demo-icfg-corrections
+        run: >
+          npx --yes firebase-tools@14 emulators:exec
+          --only firestore --project demo-icfg-corrections
+          --config firebase.emulator.json
+          "node --test tests/firestoreEmulator.integration.js tests/icfgApi.emulator.integration.js"

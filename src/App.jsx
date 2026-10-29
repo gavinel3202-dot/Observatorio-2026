@@ -1,5 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import jsPDF from "jspdf";
+import CorrectionPreview from "./CorrectionPreview";
+import AdminFormadores from "./AdminFormadores";
 import {
   UserRound,
   RotateCcw,
@@ -75,6 +77,9 @@ const initialPerson = () => ({
   peso: "",
   talla: "",
 });
+
+// Bloqueo visual de la administración hasta disponer de Firebase staging independiente.
+const ADMIN_UI_ENABLED = import.meta.env.VITE_ICFG_ADMIN_UI === "true";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("evaluacion");
@@ -461,6 +466,10 @@ const generatePDF = () => {
           {[
             { id: "evaluacion", label: "Nueva Evaluación", icon: ClipboardList },
             { id: "seguimiento", label: "Seguimiento", icon: TrendingUp },
+            { id: "correccion", label: "Corrección (prueba)", icon: ClipboardList },
+            ...(ADMIN_UI_ENABLED && firebaseEnabled
+              ? [{ id: "administracion", label: "Administración (ensayo)", icon: BadgeCheck }]
+              : []),
           ].map((tab) => {
             const Icon = tab.icon;
             return (
@@ -479,7 +488,11 @@ const generatePDF = () => {
           })}
         </div>
 
-        {activeTab === "seguimiento" ? (
+        {activeTab === "administracion" && ADMIN_UI_ENABLED && firebaseEnabled ? (
+          <AdminFormadores />
+        ) : activeTab === "correccion" ? (
+          <CorrectionPreview records={records} />
+        ) : activeTab === "seguimiento" ? (
           <Card>
             <CardContent>
               <h2 className="mb-1 flex items-center gap-2 text-xl font-bold">
