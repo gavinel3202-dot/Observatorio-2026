@@ -191,6 +191,51 @@ export default function VerifyAdminEmail() {
     }
   }
 
+  async function removeCompromisedTotp() {
+    // La operación SOLO se ejecuta tras confirmación expresa del titular,
+    // en Firebase de ensayo y sobre el segundo factor de su propia sesión.
+    const ok = window.confirm(
+      "¿Retirar el segundo factor TOTP actual? El código anterior dejará de funcionar. " +
+      "Tendrás que volver a iniciar sesión y registrar una clave NUEVA que no hayas compartido. " +
+      "No continúes si no puedes acceder a tu correo y contraseña."
+    );
+    if (!ok) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const auth = await verificationAuth();
+      const user = auth.currentUser;
+      if (!user?.emailVerified) throw new Error("Inicia sesión con el correo verificado de pruebas.");
+      const totpFactors = multiFactor(user).enrolledFactors.filter(
+        (factor) => factor.factorId === TotpMultiFactorGenerator.FACTOR_ID
+      );
+      if (totpFactors.length !== 1) {
+        throw new Error("No hay exactamente un factor TOTP. Revisa la configuración antes de modificarla.");
+      }
+      await multiFactor(user).unenroll(totpFactors[0]);
+      await signOut(auth).catch(() => {});
+      setSignedInEmail("");
+      setVerified(false);
+      setHasTotp(false);
+      setTotpSecret(null);
+      setTotpCode("");
+      setRevealKey(false);
+      setPassword("");
+      setMfaResolver(null);
+      setLoginTotpCode("");
+      setMessage(
+        "Se retiró el TOTP anterior. Inicia sesión y registra un nuevo segundo factor " +
+        "con una clave privada que no compartas ni fotografíes."
+      );
+    } catch (err) {
+      setError(safeMessage(err) +
+        " Si el proceso cerró tu sesión, vuelve a ingresar y comprueba si el factor sigue registrado.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function sendLink() {
     setBusy(true);
     setError("");
@@ -318,10 +363,20 @@ export default function VerifyAdminEmail() {
               <div className="rounded-xl border border-indigo-100 bg-indigo-50/30 p-4 space-y-3">
                 <h2 className="text-lg font-bold">Google Authenticator (TOTP)</h2>
                 {hasTotp ? (
-                  <p className="rounded-lg bg-green-50 p-3 text-sm font-medium text-green-900">
-                    El segundo factor TOTP ya está registrado para esta cuenta.
-                    Cierra sesión y vuelve a acceder para comprobarlo.
-                  </p>
+                  <div className="space-y-3">
+                    <p className="rounded-lg bg-green-50 p-3 text-sm font-medium text-green-900">
+                      El segundo factor TOTP ya está registrado para esta cuenta.
+                      Cierra sesión y vuelve a acceder para comprobarlo.
+                    </p>
+                    <p className="text-sm text-amber-900">
+                      Si la clave que vinculaste apareció en una captura o fue compartida,
+                      debes retirarla y crear otra antes de conceder permisos administrativos.
+                    </p>
+                    <button type="button" disabled={busy} onClick={removeCompromisedTotp}
+                      className="rounded-lg border border-amber-400 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 disabled:opacity-50">
+                      Sustituir TOTP anterior (clave expuesta)
+                    </button>
+                  </div>
                 ) : (
                   <>
                     <p className="text-sm text-slate-700">
