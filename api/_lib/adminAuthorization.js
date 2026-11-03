@@ -36,8 +36,7 @@ export async function verifyAdministrator({
       token.icfgAdmin !== true ||
       token.email_verified !== true ||
       token.firebase?.sign_in_provider !== "password" ||
-      typeof token.firebase?.sign_in_second_factor !== "string" ||
-      token.firebase.sign_in_second_factor.length === 0) {
+      token.firebase?.sign_in_second_factor !== "totp") {
     throw new AdminAccessError();
   }
 
