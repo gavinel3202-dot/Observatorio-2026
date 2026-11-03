@@ -16,10 +16,30 @@ export async function adminFirestore() {
   ]);
 
   if (!getApps().length) {
-    const config = emulated
-      ? { projectId: "demo-icfg-corrections" }
-      : { credential: cert(JSON.parse(credentials)) };
+    let config;
+    if (emulated) {
+      config = { projectId: "demo-icfg-corrections" };
+    } else {
+      // Bloqueo de entorno: jamás aceptar por accidente credenciales
+      // del Firebase institucional en el servidor aislado de ensayos.
+      const expected = process.env.ICFG_EXPECTED_FIREBASE_PROJECT_ID;
+      if (expected !== "observatorio-icfg-pruebas") {
+        throw new Error("Proyecto Firebase de ensayo no autorizado.");
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(credentials);
+      } catch {
+        throw new Error("Credencial del servidor inválida.");
+      }
+      if (parsed?.project_id !== expected) {
+        throw new Error("La credencial Firebase no corresponde al proyecto de ensayo.");
+      }
+      config = { credential: cert(parsed), projectId: expected };
+    }
     initializeApp(config);
+  } else if (!emulated && getApps()[0].options.projectId !== "observatorio-icfg-pruebas") {
+    throw new Error("Firebase Admin estaba inicializado con un proyecto no autorizado.");
   }
   return {
     firestore: getFirestore(),
