@@ -13,7 +13,7 @@ function context(overrides = {}) {
     icfgAdmin: true,
     email_verified: true,
     auth_time: seconds - 120,
-    firebase: { sign_in_provider: "password", sign_in_second_factor: "phone" },
+    firebase: { sign_in_provider: "password", sign_in_second_factor: "totp" },
     ...(overrides.token || {}),
   };
   const user = {
@@ -47,6 +47,7 @@ test("identidad distinta, usuario anónimo o sin MFA son rechazados", async () =
     { uid: "un-uid-distinto" },
     { firebase: { sign_in_provider: "anonymous" } },
     { firebase: { sign_in_provider: "password" } },
+    { firebase: { sign_in_provider: "password", sign_in_second_factor: "phone" } },
     { icfgAdmin: false },
     { email_verified: false },
   ]) {
