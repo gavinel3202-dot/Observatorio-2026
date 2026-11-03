@@ -18,12 +18,12 @@
 - [x] API de sesión y API de correcciones bloqueadas por defecto con `ICFG_SESSION_ENABLED` y `ICFG_CORRECTIONS_ENABLED` respectivamente.
 
 ## Pendientes de activación
-- [ ] Configurar un proyecto Firebase de staging real, distinto de `calculadora-funcional-7f9d8`; pruebas integrales de despliegue con credenciales ficticias y backups.
+- [x] Crear un Firebase de staging independiente (`observatorio-icfg-pruebas`) y verificar la conexión de lectura con datos ficticios. Quedan pendientes las pruebas integrales y los respaldos.
 - [ ] Comprobar HTTP en un Preview protegido utilizando acceso autenticado de Vercel (`vercel curl` o token OIDC de desarrollo). Un HTTP 401 sin credenciales es inconcluso y no prueba el servicio.
 - [ ] Verificar con Vercel la obtención de IP real y el impacto de bloqueos por IP compartida en una sede institucional.
-- [ ] Aprovisionar credenciales de servidor y secretos en Vercel, solo en entorno aislado. Jamás guardarlos en GitHub ni en variables `VITE_*`.
-- [ ] Habilitar en un Firebase **de pruebas** autenticación administrativa real (cuenta personal y MFA TOTP), otorgar claim `icfgAdmin` fuera de la aplicación y configurar UID y permisos. La pantalla ya existe, pero **no hay cuenta de staging aprovisionada ni prueba interactiva de MFA real**.
-- [ ] Verificar el soporte TOTP (Identity Platform), sus requisitos y la política institucional; el formulario inicial no soporta SMS como segundo factor.
+- [ ] Aprovisionar credenciales de servidor y secretos en Vercel, solo en entorno aislado. Jamás guardarlos en GitHub ni en variables `VITE_*`. El backend exige adicionalmente `ICFG_EXPECTED_FIREBASE_PROJECT_ID=observatorio-icfg-pruebas` y verifica que coincida con el `project_id` de la credencial.
+- [x] Verificar correo, TOTP y reingreso de cuenta administrativa en Firebase de pruebas; asignar claim `icfgAdmin` y configurar `ICFG_ADMIN_UID` en Vercel de ensayo. Pendiente prueba del backend con credenciales de servicio.
+- [x] Habilitar TOTP en Identity Platform de pruebas y probar inicio de sesión por dos factores. El servidor de administración rechaza ahora segundo factor SMS.
 - [ ] Preparar la gestión segura de la rotación de contraseña compartida mediante secretos del backend; no construir un formulario de rotación que escriba secretos en repositorios o variables públicas.
 - [ ] Exportar y respaldar toda la colección real; validar restauración.
 - [ ] Migrar reglas Firestore, registro y consulta en un proceso coordinado. La regla actual `allow read, write: if request.auth != null` permite aún modificaciones directas desde usuarios anónimos: el nuevo backend **no corrige ese riesgo** por sí solo.
@@ -31,7 +31,7 @@
 - [ ] Aprobar la integración, ejecutar pruebas de regresión con formadores y publicar gradualmente.
 
 ## Variables (sin valores)
-- Servidor: `FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON`, `ICFG_INSTITUTIONAL_PASSWORD_HASH`, `ICFG_SESSION_SECRET`, `ICFG_RATE_LIMIT_SECRET`, `ICFG_SESSION_EPOCH`.
+- Servidor: `FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON`, `ICFG_EXPECTED_FIREBASE_PROJECT_ID`, `ICFG_INSTITUTIONAL_PASSWORD_HASH`, `ICFG_SESSION_SECRET`, `ICFG_RATE_LIMIT_SECRET`, `ICFG_SESSION_EPOCH`.
 - Interruptores de servidor **deshabilitados por defecto**: `ICFG_SESSION_ENABLED`, `ICFG_CORRECTIONS_ENABLED`, `ICFG_ADMIN_ENABLED`.
 - Cuenta administrativa única (solo servidor): `ICFG_ADMIN_UID`.
 - Interruptores de interfaz **deshabilitados por defecto**: `VITE_ICFG_CORRECTION_ACCESS`, `VITE_ICFG_ADMIN_UI`.
