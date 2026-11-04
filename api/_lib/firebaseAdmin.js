@@ -23,7 +23,15 @@ let lastVercelOidcToken = null;
 const federatedCredential = {
   async getAccessToken() {
     if (!lastVercelOidcToken) throw new Error("Token OIDC de función no disponible.");
-    return getShortLivedServiceAccountToken(lastVercelOidcToken);
+    try {
+      return await getShortLivedServiceAccountToken(lastVercelOidcToken);
+    } catch (error) {
+      // Solo registrar etapa controlada: nunca JWT ni respuestas de Google.
+      const stage = ["server_configuration", "vercel_oidc", "google_sts",
+        "iam_impersonation"].includes(error?.stage) ? error.stage : "exchange_network";
+      console.error("ICFG OIDC intercambio detenido en etapa:", stage);
+      throw error;
+    }
   },
 };
 
