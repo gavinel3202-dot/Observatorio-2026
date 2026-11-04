@@ -37,6 +37,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Datos de acceso inválidos." });
   }
 
+  let cleanup = null;
   try {
     const hash = process.env.ICFG_INSTITUTIONAL_PASSWORD_HASH;
     const secret = process.env.ICFG_SESSION_SECRET;
@@ -51,7 +52,8 @@ export default async function handler(req, res) {
       ? (req.headers?.["x-vercel-forwarded-for"] || req.headers?.["x-forwarded-for"])
       : null;
     const ip = String(forwarded || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
-    const { firestore: adminDb } = await adminFirestore({ requestHeaders: req.headers });
+    const { firestore: adminDb, cleanup: dispose } = await adminFirestore({ requestHeaders: req.headers });
+    cleanup = dispose;
     const limiter = loginRateLimiter(adminDb, process.env.ICFG_RATE_LIMIT_SECRET);
     const result = await authenticateTrainer({
       code, password, ip, hash, sessionSecret: secret, epoch,
@@ -64,5 +66,8 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error("No se pudo completar la autenticación institucional:", error.message);
     return res.status(503).json({ error: "Servicio de acceso no disponible." });
+  } finally {
+    // Cerrar clientes y liberar tokens vinculados a esta invocación.
+    if (cleanup) await cleanup();
   }
 }
