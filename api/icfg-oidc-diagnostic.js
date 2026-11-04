@@ -7,6 +7,7 @@
  */
 import { adminFirestore } from "./_lib/firebaseAdmin.js";
 import { verifyAdministrator, AdminAccessError } from "./_lib/adminAuthorization.js";
+import { IcfgOidcError } from "./_lib/vercelWorkloadIdentity.js";
 
 const DEMO_DOCUMENT =
   "artifacts/icfg-app-id/public/data/evaluaciones_icfg/EVAL-PRUEBA-001";
@@ -26,16 +27,19 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "El diagnóstico no acepta datos." });
   }
 
+  let stage = "firebase_initialization";
   try {
     const { firestore, auth } = await adminFirestore({
       requestHeaders: req.headers,
     });
+    stage = "admin_verification";
     await verifyAdministrator({
       authorization: req.headers?.authorization,
       authClient: auth,
       allowedUid: process.env.ICFG_ADMIN_UID,
     });
 
+    stage = "firestore_read";
     // La única operación sobre Firestore es una lectura de existencia.
     const testDocument = await firestore.doc(DEMO_DOCUMENT).get();
     return res.status(200).json({
@@ -49,7 +53,15 @@ export default async function handler(req, res) {
     if (error instanceof AdminAccessError) {
       return res.status(error.status).json({ error: error.message });
     }
-    console.error("Diagnóstico OIDC de ensayos no disponible:", error?.name || "Error");
-    return res.status(503).json({ error: "No se pudo verificar la conexión de ensayos." });
+    // Los códigos y etapas son datos no secretos. Nunca devolver ni registrar
+    // JWT, contraseñas, credenciales temporales ni respuestas completas.
+    const safeStage = error instanceof IcfgOidcError ? error.stage : stage;
+    const safeCode = typeof error?.code === "string" ? error.code.slice(0, 72) : "none";
+    console.error("Diagnóstico OIDC de ensayos:", { stage: safeStage, code: safeCode,
+      errorType: error?.name || "Error" });
+    return res.status(503).json({
+      error: "No se pudo verificar la conexión de ensayos.",
+      stage: safeStage,
+    });
   }
 }
