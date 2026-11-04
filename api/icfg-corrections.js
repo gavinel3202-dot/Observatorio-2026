@@ -20,6 +20,7 @@ export default async function handler(req, res) {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Método no permitido." });
   }
+  let cleanup = null;
   try {
     const secret = process.env.ICFG_SESSION_SECRET;
     const epochRaw = process.env.ICFG_SESSION_EPOCH;
@@ -40,7 +41,8 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Solicitud inválida." });
     }
 
-    const { firestore, serverTimestamp } = await adminFirestore({ requestHeaders: req.headers });
+    const { firestore, serverTimestamp, cleanup: dispose } = await adminFirestore({ requestHeaders: req.headers });
+    cleanup = dispose;
     const active = await trainerDirectory(firestore).getActive(claims.code);
     if (!active) return res.status(403).json({ error: "Formador no autorizado." });
 
@@ -58,5 +60,8 @@ export default async function handler(req, res) {
     }
     console.error("Falló el servicio de corrección ICFG:", error?.name || "Error");
     return res.status(503).json({ error: "Servicio de corrección no disponible." });
+  } finally {
+    // Cerrar clientes y liberar tokens vinculados a esta invocación.
+    if (cleanup) await cleanup();
   }
 }
