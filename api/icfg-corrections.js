@@ -40,7 +40,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Solicitud inválida." });
     }
 
-    const { firestore, serverTimestamp } = await adminFirestore();
+    const { firestore, serverTimestamp } = await adminFirestore({ requestHeaders: req.headers });
     const active = await trainerDirectory(firestore).getActive(claims.code);
     if (!active) return res.status(403).json({ error: "Formador no autorizado." });
 
