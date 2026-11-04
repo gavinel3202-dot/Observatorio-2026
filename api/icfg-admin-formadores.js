@@ -37,11 +37,12 @@ export default async function handler(req, res) {
   try {
     // Firebase debe inicializarse antes de getAuth(). No usar sesiones
     // de formador ni contraseñas compartidas para administrar permisos.
-    const { firestore, serverTimestamp } = await adminFirestore();
-    const { getAuth } = await import("firebase-admin/auth");
+    const { firestore, auth, serverTimestamp } = await adminFirestore({
+      requestHeaders: req.headers,
+    });
     const admin = await verifyAdministrator({
       authorization: req.headers?.authorization,
-      authClient: getAuth(),
+      authClient: auth,
       allowedUid: process.env.ICFG_ADMIN_UID,
     });
 
