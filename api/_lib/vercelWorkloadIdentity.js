@@ -30,7 +30,7 @@ export function vercelOidcTokenFromHeaders(headers) {
   const raw = headers?.["x-vercel-oidc-token"];
   const token = Array.isArray(raw) ? raw[0] : raw;
   if (typeof token !== "string" || token.length > 12000 ||
-      !/^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$/.test(token)) {
+      !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)) {
     throw new Error("Token OIDC de Vercel no disponible.");
   }
   return token;
