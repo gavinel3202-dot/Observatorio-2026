@@ -11,6 +11,14 @@ export const STAGING_PROVIDER =
 export const STAGING_SERVICE_ACCOUNT =
   "icfg-staging-backend@observatorio-icfg-pruebas.iam.gserviceaccount.com";
 
+export class IcfgOidcError extends Error {
+  constructor(stage, message) {
+    super(message);
+    this.name = "IcfgOidcError";
+    this.stage = stage;
+  }
+}
+
 const SCOPE = "https://www.googleapis.com/auth/cloud-platform";
 const STS_ENDPOINT = "https://sts.googleapis.com/v1/token";
 const IAM_ENDPOINT =
@@ -22,7 +30,7 @@ export function requireStagingOidcConfiguration(env = process.env) {
       env.ICFG_WORKLOAD_IDENTITY_PROVIDER !== STAGING_PROVIDER ||
       env.ICFG_SERVICE_ACCOUNT_EMAIL !== STAGING_SERVICE_ACCOUNT ||
       env.FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON) {
-    throw new Error("Identidad de servidor ICFG de ensayos no configurada.");
+    throw new IcfgOidcError("server_configuration", "Identidad de servidor ICFG de ensayos no configurada.");
   }
 }
 
@@ -31,7 +39,7 @@ export function vercelOidcTokenFromHeaders(headers) {
   const token = Array.isArray(raw) ? raw[0] : raw;
   if (typeof token !== "string" || token.length > 12000 ||
       !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)) {
-    throw new Error("Token OIDC de Vercel no disponible.");
+    throw new IcfgOidcError("vercel_oidc", "Token OIDC de Vercel no disponible.");
   }
   return token;
 }
@@ -43,7 +51,7 @@ async function postJSON(url, { headers, body, fetchImpl }) {
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(12000),
   });
-  if (!result.ok) throw new Error("No se autorizó el intercambio OIDC con Google Cloud.");
+  if (!result.ok) throw new IcfgOidcError("iam_impersonation", "Google Cloud rechazó la suplantación temporal.");
   return result.json();
 }
 
@@ -68,10 +76,10 @@ export async function getShortLivedServiceAccountToken(
     body: form.toString(),
     signal: AbortSignal.timeout(12000),
   });
-  if (!exchange.ok) throw new Error("Google STS rechazó la identidad del despliegue.");
+  if (!exchange.ok) throw new IcfgOidcError("google_sts", "Google STS rechazó la identidad del despliegue.");
   const temporary = await exchange.json();
   if (typeof temporary?.access_token !== "string" || temporary.access_token.length < 20) {
-    throw new Error("Google STS no devolvió una credencial temporal válida.");
+    throw new IcfgOidcError("google_sts", "Google STS no devolvió una credencial temporal válida.");
   }
 
   const result = await postJSON(IAM_ENDPOINT, {
@@ -82,7 +90,7 @@ export async function getShortLivedServiceAccountToken(
   const remaining = Math.floor((Date.parse(result?.expireTime) - now()) / 1000) - 60;
   if (typeof result?.accessToken !== "string" || result.accessToken.length < 20 ||
       !Number.isFinite(remaining) || remaining < 60) {
-    throw new Error("Google IAM no devolvió una sesión de servicio válida.");
+    throw new IcfgOidcError("iam_impersonation", "Google IAM no devolvió una sesión de servicio válida.");
   }
   return { access_token: result.accessToken, expires_in: Math.min(remaining, 3500) };
 }
