@@ -34,12 +34,14 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Campos administrativos no autorizados." });
   }
 
+  let cleanup = null;
   try {
     // Firebase debe inicializarse antes de getAuth(). No usar sesiones
     // de formador ni contraseñas compartidas para administrar permisos.
-    const { firestore, auth, serverTimestamp } = await adminFirestore({
+    const { firestore, auth, serverTimestamp, cleanup: dispose } = await adminFirestore({
       requestHeaders: req.headers,
     });
+    cleanup = dispose;
     const admin = await verifyAdministrator({
       authorization: req.headers?.authorization,
       authClient: auth,
@@ -63,5 +65,8 @@ export default async function handler(req, res) {
     }
     console.error("Falló servicio administrativo ICFG:", error?.name || "Error");
     return res.status(503).json({ error: "Servicio administrativo no disponible." });
+  } finally {
+    // Cerrar clientes y liberar tokens vinculados a esta invocación.
+    if (cleanup) await cleanup();
   }
 }
