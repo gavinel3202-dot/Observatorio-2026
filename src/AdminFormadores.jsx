@@ -121,6 +121,37 @@ export default function AdminFormadores() {
     return requestTrainerAdmin(token, payload);
   };
 
+  const checkOidcConnection = async () => {
+    clearFeedback();
+    setBusy(true);
+    try {
+      const token = await adminIdentityToken();
+      const response = await fetch("/api/icfg-oidc-diagnostic", {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: "{}",
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error || "No se pudo comprobar la conexión segura.");
+      }
+      if (body.ok !== true || body.firestoreRead !== "success") {
+        throw new Error("La conexión no pasó todas las comprobaciones.");
+      }
+      setMessage(body.syntheticDocumentFound
+        ? "Conexión OIDC y lectura de Firestore de pruebas verificadas. No se modificaron datos."
+        : "Conexión OIDC y lectura de Firestore verificadas. El registro ficticio de referencia no existe.");
+    } catch (err) {
+      setError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const consult = async (event) => {
     event.preventDefault();
     const normalized = normalizeAdminTrainerCode(code);
@@ -252,6 +283,16 @@ export default function AdminFormadores() {
             <button type="button" onClick={logout} disabled={busy}
               className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50">
               Cerrar sesión
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-sky-200 bg-sky-50 p-4">
+            <p className="mb-2 text-sm text-sky-900">
+              Diagnóstico de conexión sin escrituras: comprueba OIDC y lectura de Firebase de ensayos.
+            </p>
+            <button type="button" onClick={checkOidcConnection} disabled={busy}
+              className={COMMON_BUTTON}>
+              {busy ? "Verificando conexión…" : "Comprobar conexión segura"}
             </button>
           </div>
 
