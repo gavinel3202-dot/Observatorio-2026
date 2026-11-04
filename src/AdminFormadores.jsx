@@ -137,7 +137,18 @@ export default function AdminFormadores() {
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(body.error || "No se pudo comprobar la conexión segura.");
+        const safeStages = {
+          server_configuration: "configuración del servidor",
+          vercel_oidc: "identidad OIDC de Vercel",
+          google_sts: "intercambio de identidad con Google",
+          iam_impersonation: "autorización temporal de la cuenta de servicio",
+          firebase_initialization: "inicialización de Firebase Admin",
+          admin_verification: "verificación administrativa",
+          firestore_read: "lectura de Firestore de ensayos",
+        };
+        const detail = safeStages[body.stage];
+        throw new Error((body.error || "No se pudo comprobar la conexión segura.") +
+          (detail ? ` Etapa: ${detail}.` : ""));
       }
       if (body.ok !== true || body.firestoreRead !== "success") {
         throw new Error("La conexión no pasó todas las comprobaciones.");
