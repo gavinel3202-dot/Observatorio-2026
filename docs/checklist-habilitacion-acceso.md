@@ -21,7 +21,9 @@
 - [x] Crear un Firebase de staging independiente (`observatorio-icfg-pruebas`) y verificar la conexión de lectura con datos ficticios. Quedan pendientes las pruebas integrales y los respaldos.
 - [ ] Comprobar HTTP en un Preview protegido utilizando acceso autenticado de Vercel (`vercel curl` o token OIDC de desarrollo). Un HTTP 401 sin credenciales es inconcluso y no prueba el servicio.
 - [ ] Verificar con Vercel la obtención de IP real y el impacto de bloqueos por IP compartida en una sede institucional.
-- [ ] Aprovisionar credenciales de servidor y secretos en Vercel, solo en entorno aislado. Jamás guardarlos en GitHub ni en variables `VITE_*`. El backend exige adicionalmente `ICFG_EXPECTED_FIREBASE_PROJECT_ID=observatorio-icfg-pruebas` y verifica que coincida con el `project_id` de la credencial.
+- [x] Crear cuenta de servicio ICFG Staging Backend con roles de lectura de Authentication y usuario de Datastore en Firebase de ensayos; configurar federación Workload Identity mediante Vercel OIDC, sujeto específico y variables no secretas en Vercel.
+- [x] Sustituir la exigencia de clave JSON de Firebase Admin por intercambio OIDC -> Google STS -> suplantación temporal de cuenta de servicio. El backend exige proyecto, proveedor, servicio y entorno específicos y rechaza credenciales JSON permanentes.
+- [ ] Realizar prueba real de intercambio OIDC contra Google STS e IAM Credentials, sin escrituras; comprobar que IAM Credentials API esté habilitada, y verificar que las funciones Vercel reciben el encabezado OIDC.
 - [x] Verificar correo, TOTP y reingreso de cuenta administrativa en Firebase de pruebas; asignar claim `icfgAdmin` y configurar `ICFG_ADMIN_UID` en Vercel de ensayo. Pendiente prueba del backend con credenciales de servicio.
 - [x] Habilitar TOTP en Identity Platform de pruebas y probar inicio de sesión por dos factores. El servidor de administración rechaza ahora segundo factor SMS.
 - [ ] Preparar la gestión segura de la rotación de contraseña compartida mediante secretos del backend; no construir un formulario de rotación que escriba secretos en repositorios o variables públicas.
@@ -31,7 +33,8 @@
 - [ ] Aprobar la integración, ejecutar pruebas de regresión con formadores y publicar gradualmente.
 
 ## Variables (sin valores)
-- Servidor: `FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON`, `ICFG_EXPECTED_FIREBASE_PROJECT_ID`, `ICFG_INSTITUTIONAL_PASSWORD_HASH`, `ICFG_SESSION_SECRET`, `ICFG_RATE_LIMIT_SECRET`, `ICFG_SESSION_EPOCH`.
+- Servidor (sin clave privada): `ICFG_EXPECTED_FIREBASE_PROJECT_ID`, `ICFG_WORKLOAD_IDENTITY_PROVIDER`, `ICFG_SERVICE_ACCOUNT_EMAIL`, `ICFG_INSTITUTIONAL_PASSWORD_HASH`, `ICFG_SESSION_SECRET`, `ICFG_RATE_LIMIT_SECRET`, `ICFG_SESSION_EPOCH`.
+- No configurar `FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON`: la rama de ensayos la rechaza. Los tokens OIDC los suministra el contexto de la función Vercel.
 - Interruptores de servidor **deshabilitados por defecto**: `ICFG_SESSION_ENABLED`, `ICFG_CORRECTIONS_ENABLED`, `ICFG_ADMIN_ENABLED`.
 - Cuenta administrativa única (solo servidor): `ICFG_ADMIN_UID`.
 - Interruptores de interfaz **deshabilitados por defecto**: `VITE_ICFG_CORRECTION_ACCESS`, `VITE_ICFG_ADMIN_UI`.
