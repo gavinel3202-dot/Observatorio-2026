@@ -28,10 +28,12 @@ export default async function handler(req, res) {
   }
 
   let stage = "firebase_initialization";
+  let cleanup = null;
   try {
-    const { firestore, auth } = await adminFirestore({
+    const { firestore, auth, cleanup: dispose } = await adminFirestore({
       requestHeaders: req.headers,
     });
+    cleanup = dispose;
     stage = "admin_verification";
     await verifyAdministrator({
       authorization: req.headers?.authorization,
@@ -63,5 +65,8 @@ export default async function handler(req, res) {
       error: "No se pudo verificar la conexión de ensayos.",
       stage: safeStage,
     });
+  } finally {
+    // Cerrar clientes y liberar tokens vinculados a esta invocación.
+    if (cleanup) await cleanup();
   }
 }
