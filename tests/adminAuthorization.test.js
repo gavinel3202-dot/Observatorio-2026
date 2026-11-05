@@ -83,3 +83,18 @@ test("rechaza petición sin token e impide omitir el UID autorizado", async () =
     ...context(), allowedUid: "",
   }), /Configuración administrativa incompleta/);
 });
+
+test("clasifica rechazos sin registrar UID, correo ni tokens", async () => {
+  for (const [reason, overrides] of [
+    ["uid_mismatch", { token: { uid: "otro-uid" } }],
+    ["claim_missing", { token: { icfgAdmin: false } }],
+    ["record_claim_missing", { user: { customClaims: {} } }],
+    ["totp_missing", { token: { firebase: { sign_in_provider: "password", sign_in_second_factor: "phone" } } }],
+  ]) {
+    await assert.rejects(
+      verifyAdministrator(context(overrides)),
+      (error) => error instanceof AdminAccessError &&
+        error.status === 403 && error.reason === reason
+    );
+  }
+});
