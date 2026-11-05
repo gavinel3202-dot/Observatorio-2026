@@ -53,6 +53,13 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     if (error instanceof AdminAccessError) {
+      // Solo códigos genéricos y no sensibles en el registro interno.
+      // La respuesta al navegador conserva el mensaje uniforme.
+      console.warn("Diagnóstico de autorización ICFG:", {
+        stage: "admin_verification",
+        reason: error.reason || "unauthorized",
+        status: error.status,
+      });
       return res.status(error.status).json({ error: error.message });
     }
     // Los códigos y etapas son datos no secretos. Nunca devolver ni registrar
