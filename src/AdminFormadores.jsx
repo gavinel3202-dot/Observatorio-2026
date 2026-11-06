@@ -240,8 +240,9 @@ export default function AdminFormadores() {
           La contraseña institucional compartida no da acceso a esta sección.
         </p>
         <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          Módulo en desarrollo. La función de servidor permanece bloqueada hasta configurar
-          un entorno de pruebas independiente y aprobar la habilitación institucional.
+          Módulo de ensayos: la administración requiere un permiso de servidor independiente
+          y autenticación personal con TOTP. Los registros operativos y las correcciones
+          continúan bloqueados hasta su aprobación y pruebas de seguridad.
         </p>
       </div>
 
