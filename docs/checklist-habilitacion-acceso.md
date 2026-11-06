@@ -17,14 +17,23 @@
 - [x] Interfaz de sesión/guardado preparada detrás de `VITE_ICFG_CORRECTION_ACCESS`. Sin la bandera, conserva la vista previa y el botón Guardar deshabilitado.
 - [x] API de sesión y API de correcciones bloqueadas por defecto con `ICFG_SESSION_ENABLED` y `ICFG_CORRECTIONS_ENABLED` respectivamente.
 
+## Evidencia de ensayos funcionales (6 de noviembre de 2026)
+- [x] Alta ficticia en Firebase **observatorio-icfg-pruebas**: código `DEMO-FORMADOR-01`, revisión 1, estado activo, con auditoría `FORMADOR_CREADO`.
+- [x] Suspensión ficticia en el mismo entorno: revisión 2, estado inactivo, auditoría `FORMADOR_MODIFICADO` verificada directamente en Firestore, con cambios anterior/posterior y motivo.
+- [x] Prueba de integración contra **Firestore Emulator local**: alta de formador ficticio, sesión autorizada, suspensión que rechaza nuevas sesiones y correcciones con token previo, reactivación y tres eventos de auditoría. Se probó contra `demo-icfg-corrections`, **no** contra Firebase staging ni producción institucional.
+- [x] Variables de ensayo en Vercel: `ICFG_SESSION_SECRET` y `ICFG_RATE_LIMIT_SECRET` sensibles y aleatorias e `ICFG_SESSION_EPOCH=1`. No documentar sus valores.
+- [x] Bloqueos en Vercel staging: `ICFG_SESSION_ENABLED=false` y `ICFG_CORRECTIONS_ENABLED=false`. Administración ficticia `ICFG_ADMIN_ENABLED=true` únicamente en `observatorio-icfg-staging`.
+- [ ] Elegir y registrar **sin compartir el texto claro** de una contraseña institucional exclusiva de ensayos; almacenar su hash scrypt únicamente en `ICFG_INSTITUTIONAL_PASSWORD_HASH` como secreto del servidor.
+- [ ] Validar inicio de sesión HTTPS real de formadores ficticios activos y suspendidos, límites de intentos y cierre de sesión. Solo entonces considerar activar acceso operativo en staging, en una ventana controlada; nunca activar correcciones reales como parte de esa prueba.
+
 ## Pendientes de activación
 - [x] Crear un Firebase de staging independiente (`observatorio-icfg-pruebas`) y verificar la conexión de lectura con datos ficticios. Quedan pendientes las pruebas integrales y los respaldos.
 - [ ] Comprobar HTTP en un Preview protegido utilizando acceso autenticado de Vercel (`vercel curl` o token OIDC de desarrollo). Un HTTP 401 sin credenciales es inconcluso y no prueba el servicio.
 - [ ] Verificar con Vercel la obtención de IP real y el impacto de bloqueos por IP compartida en una sede institucional.
 - [x] Crear cuenta de servicio ICFG Staging Backend con roles de lectura de Authentication y usuario de Datastore en Firebase de ensayos; configurar federación Workload Identity mediante Vercel OIDC, sujeto específico y variables no secretas en Vercel.
 - [x] Sustituir la exigencia de clave JSON de Firebase Admin por intercambio OIDC -> Google STS -> suplantación temporal de cuenta de servicio. El backend exige proyecto, proveedor, servicio y entorno específicos y rechaza credenciales JSON permanentes.
-- [ ] Realizar prueba real de intercambio OIDC contra Google STS e IAM Credentials, sin escrituras; comprobar que IAM Credentials API esté habilitada, y verificar que las funciones Vercel reciben el encabezado OIDC.
-- [x] Verificar correo, TOTP y reingreso de cuenta administrativa en Firebase de pruebas; asignar claim `icfgAdmin` y configurar `ICFG_ADMIN_UID` en Vercel de ensayo. Pendiente prueba del backend con credenciales de servicio.
+- [x] Prueba real de intercambio OIDC contra Google STS e IAM Credentials y lectura de un documento ficticio de Firestore staging; diagnóstico administrativo con MFA y sin escrituras confirmado en la interfaz (noviembre de 2026).
+- [x] Verificar correo, TOTP y reingreso de cuenta administrativa en Firebase de pruebas; asignar claim `icfgAdmin`, configurar `ICFG_ADMIN_UID` en Vercel de ensayo y comprobar la autorización real con credenciales temporales.
 - [x] Habilitar TOTP en Identity Platform de pruebas y probar inicio de sesión por dos factores. El servidor de administración rechaza ahora segundo factor SMS.
 - [ ] Preparar la gestión segura de la rotación de contraseña compartida mediante secretos del backend; no construir un formulario de rotación que escriba secretos en repositorios o variables públicas.
 - [ ] Exportar y respaldar toda la colección real; validar restauración.
