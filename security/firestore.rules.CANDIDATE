@@ -1,0 +1,19 @@
+// BORRADOR PARA REVISIÓN — NO PUBLICAR SIN MIGRACIÓN Y PRUEBAS.
+// Estas reglas restringen las escrituras directas desde el cliente.
+// Las correcciones y bajas lógicas deben ejecutarse en un backend de confianza
+// que valide las autorizaciones y escriba con Admin SDK.
+// La creación sigue permitida a sesiones Firebase anónimas existentes
+// ÚNICAMENTE durante la migración. Debe restringirse posteriormente.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /artifacts/{appId}/public/data/evaluaciones_icfg/{docId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasAll(['nombre', 'scores', 'total', 'fecha']);
+      allow update, delete: if false;
+    }
+    // No exponer en rutas públicas los códigos, roles, hashes ni auditorías.
+    // Las colecciones de autorización deben quedar sin reglas de acceso cliente.
+  }
+}
