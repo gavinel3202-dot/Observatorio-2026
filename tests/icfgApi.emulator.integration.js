@@ -140,3 +140,78 @@ test("administrador: alta y suspensión con auditoría real en Firestore Emulato
   // No se hizo ningún borrado físico.
   assert.equal((await firestore.collection("icfg_formadores_privados").doc(code).get()).exists, true);
 });
+
+
+test("formador suspendido no puede obtener sesión; alta y reactivación sí, con auditoría", async () => {
+  const { firestore, serverTimestamp } = await adminFirestore();
+  const { setTrainerByAdmin } = await import("../api/_lib/adminTrainerService.js");
+  const admin = { uid: "UID-ADMIN-EMULADOR", role: "admin", mfaVerified: true };
+  const code = "DEMO-FORMADOR-EMULADOR";
+  const ip = "198.51.100.91";
+
+  // Alta ficticia: se ejerce el mismo servicio administrativo utilizado
+  // por la aplicación, contra la base de datos local del emulador.
+  const created = await setTrainerByAdmin({
+    firestore, serverTimestamp, admin, code,
+    displayName: "Formador ficticio emulador", active: true,
+    expectedRevision: 0, reason: "Alta ficticia para validar el acceso del formador",
+  });
+  assert.equal(created.revision, 1);
+  const activeLogin = await post(loginHandler, { code, password }, null, ip);
+  assert.equal(activeLogin.code, 200, JSON.stringify(activeLogin.body));
+  assert.ok(activeLogin.body.token);
+
+  const suspended = await setTrainerByAdmin({
+    firestore, serverTimestamp, admin, code,
+    displayName: "Formador ficticio emulador", active: false,
+    expectedRevision: 1, reason: "Suspensión ficticia para bloquear su inicio de sesión",
+  });
+  assert.equal(suspended.revision, 2);
+
+  // El mismo código, aun con la contraseña institucional correcta, no
+  // obtiene un nuevo token. La respuesta no revela si el código existe.
+  const suspendedLogin = await post(loginHandler, { code, password }, null, ip);
+  assert.equal(suspendedLogin.code, 401);
+  assert.deepEqual(suspendedLogin.body, { error: "Credenciales inválidas." });
+  assert.equal(suspendedLogin.body.token, undefined);
+  const nonexistentLogin = await post(loginHandler, {
+    code: "F999-INEXISTENTE", password,
+  }, null, "198.51.100.92");
+  assert.equal(nonexistentLogin.code, 401);
+  assert.deepEqual(nonexistentLogin.body, suspendedLogin.body);
+
+  // Un token que se emitió antes de la suspensión tampoco permite
+  // corregir una evaluación. No se crea ni modifica evaluación alguna.
+  const correctionDenied = await post(correctionHandler, {
+    documentId: "EVAL-FICTICIA-INEXISTENTE",
+    expectedRevision: 0,
+    changes: { person: { peso: "80" } },
+    reason: "Intento de prueba bloqueado por suspensión",
+  }, activeLogin.body.token, ip);
+  assert.equal(correctionDenied.code, 403);
+  assert.equal((await firestore.doc(
+    "artifacts/icfg-app-id/public/data/evaluaciones_icfg/EVAL-FICTICIA-INEXISTENTE"
+  ).get()).exists, false);
+
+  const reactivated = await setTrainerByAdmin({
+    firestore, serverTimestamp, admin, code,
+    displayName: "Formador ficticio emulador", active: true,
+    expectedRevision: 2, reason: "Reactivación ficticia tras prueba de suspensión",
+  });
+  assert.equal(reactivated.revision, 3);
+  const again = await post(loginHandler, { code, password }, null, ip);
+  assert.equal(again.code, 200, JSON.stringify(again.body));
+
+  const audit = await firestore.collection("icfg_formadores_audit_private")
+    .where("formadorCode", "==", code).get();
+  assert.equal(audit.size, 3);
+  const entries = audit.docs.map(doc => doc.data());
+  assert.ok(entries.some(e => e.before.revision === 0 &&
+    e.after.revision === 1 && e.after.active === true));
+  assert.ok(entries.some(e => e.before.revision === 1 &&
+    e.after.revision === 2 && e.after.active === false));
+  assert.ok(entries.some(e => e.before.revision === 2 &&
+    e.after.revision === 3 && e.after.active === true));
+  assert.ok(entries.every(e => e.adminUid === admin.uid &&
+    e.timestamp?.toDate instanceof Function));
+});
